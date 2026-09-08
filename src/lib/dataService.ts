@@ -65,14 +65,23 @@ function setLocal<T extends { id?: string }>(key: string, data: T[]) {
 
 export const BASE_SPORTS: Record<string, { name: string; icon: string }> = {
   football: { name: 'كرة القدم', icon: '⚽' },
-  futsal: { name: 'فوتسال (داخل القاعة)', icon: '⚽' },
-  basketball: { name: 'كرة السلة', icon: '🏀' },
-  handball: { name: 'كرة اليد', icon: '🤾' },
+  basketball_3x3: { name: 'كرة السلة 3 ضد 3', icon: '🏀' },
+  basketball: { name: 'كرة السلة 5 ضد 5', icon: '🏀' },
   volleyball: { name: 'الكرة الطائرة', icon: '🏐' },
+  cross_country: { name: 'العدو الريفي', icon: '🏃‍♂️' },
   athletics: { name: 'ألعاب القوى', icon: '🏃' },
-  cross_country: { name: 'العدو الريفي المدرسي', icon: '🏃‍♂️' },
-  table_tennis: { name: 'كرة الطاولة', icon: '🏓' },
-  chess: { name: 'الشطرنج المدرسي', icon: '♟️' }
+  beach_volleyball: { name: 'الكرة الطائرة الشاطئية', icon: '🏖️' },
+  mixed_volleyball: { name: 'الكرة الطائرة مختلطة', icon: '🏐' },
+  handball: { name: 'كرة اليد', icon: '🤾' },
+  beach_handball: { name: 'كرة اليد الشاطئية', icon: '🏖️' },
+  badminton: { name: 'البادمنتون', icon: '🏸' },
+  chess: { name: 'الشطرنج', icon: '♟️' },
+  boxing: { name: 'الملاكمة', icon: '🥊' },
+  judo: { name: 'الجيدو', icon: '🥋' },
+  karate: { name: 'الكراطي', icon: '🥋' },
+  rugby: { name: 'الركبي', icon: '🏉' },
+  futsal: { name: 'فوتسال (داخل القاعة)', icon: '⚽' },
+  table_tennis: { name: 'كرة الطاولة', icon: '🏓' }
 };
 
 export const SPORTS_MAP: Record<string, { name: string; icon: string }> = {

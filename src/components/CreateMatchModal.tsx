@@ -462,16 +462,13 @@ export const CreateMatchModal: React.FC<CreateMatchModalProps> = ({
                 <select
                   value={sportId}
                   onChange={(e) => setSportId(e.target.value)}
-                  className="w-full text-xs rounded-lg border border-slate-200 px-3 py-2 text-slate-800 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full text-xs rounded-lg border border-slate-200 px-3 py-2 text-slate-800 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 font-medium"
                 >
-                  <option value="football">⚽ كرة القدم</option>
-                  <option value="futsal">⚽ فوتسال (داخل القاعة)</option>
-                  <option value="handball">🤾 كرة اليد</option>
-                  <option value="basketball">🏀 كرة السلة</option>
-                  <option value="volleyball">🏐 الكرة الطائرة</option>
-                  <option value="athletics">🏃 ألعاب القوى</option>
-                  <option value="table_tennis">🏓 كرة الطاولة</option>
-                  <option value="chess">♟️ الشطرنج المدرسي</option>
+                  {Object.entries(SPORTS_MAP).map(([id, info]) => (
+                    <option key={id} value={id}>
+                      {info.icon} {info.name}
+                    </option>
+                  ))}
                 </select>
               )}
             </div>
