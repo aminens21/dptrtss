@@ -377,7 +377,7 @@ export const Login: React.FC = () => {
           <div className="text-center flex flex-col items-center">
             <AppLogo size={70} className="mx-auto mb-1" />
             <h2 className="mt-2 text-lg font-black tracking-tight text-slate-900">
-              الجامعة الملكية المغربية للرياضة المدرسية
+              الفرع الإقليمي للجامعة الملكية للرياضة المدرسية
             </h2>
             <p className="mt-0.5 text-xs text-blue-700 font-bold">
               المديرية الإقليمية لوزارة التربية الوطنية والتعليم الأولي والرياضة – تاوريرت

@@ -541,18 +541,36 @@ export const Matches: React.FC = () => {
                       )}
 
                       {canEditScore && (
-                        <button
-                          onClick={() => {
-                            if (userProfile?.role === 'SPORT_MANAGER' && managerSportId && m.sportId !== managerSportId) {
-                              toast.error(`أنت مخول لتدبير نتائج ${mSportInfo?.name || ''} فقط`);
-                              return;
-                            }
-                            setSelectedMatchForScore(m);
-                          }}
-                          className="px-3 py-1.5 bg-slate-100 hover:bg-blue-600 hover:text-white text-slate-700 font-bold rounded-lg text-xs transition-colors cursor-pointer"
-                        >
-                          {m.status === 'Completed' ? 'تعديل النتيجة' : 'تسجيل النتيجة'}
-                        </button>
+                        <>
+                          {m.status !== 'Completed' && (
+                            <button
+                              onClick={() => {
+                                if (userProfile?.role === 'SPORT_MANAGER' && managerSportId && m.sportId !== managerSportId) {
+                                  toast.error(`أنت مخول لتدبير نتائج ${mSportInfo?.name || ''} فقط`);
+                                  return;
+                                }
+                                setSelectedMatchForScore(m);
+                              }}
+                              title="إنهاء المقابلة وتأكيد النتيجة النهائية"
+                              className="px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-lg text-xs transition-colors cursor-pointer flex items-center gap-1 shadow-xs shrink-0"
+                            >
+                              <CheckCircle2 className="h-3.5 w-3.5" />
+                              <span>انتهت المباراة</span>
+                            </button>
+                          )}
+                          <button
+                            onClick={() => {
+                              if (userProfile?.role === 'SPORT_MANAGER' && managerSportId && m.sportId !== managerSportId) {
+                                toast.error(`أنت مخول لتدبير نتائج ${mSportInfo?.name || ''} فقط`);
+                                return;
+                              }
+                              setSelectedMatchForScore(m);
+                            }}
+                            className="px-3 py-1.5 bg-slate-100 hover:bg-blue-600 hover:text-white text-slate-700 font-bold rounded-lg text-xs transition-colors cursor-pointer shrink-0"
+                          >
+                            {m.status === 'Completed' ? 'تعديل النتيجة' : 'تسجيل النتيجة'}
+                          </button>
+                        </>
                       )}
 
                       {canCreate && (

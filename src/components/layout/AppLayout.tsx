@@ -131,7 +131,7 @@ export const AppLayout: React.FC = () => {
     { name: 'الرئيسية والإشعارات', href: '/dashboard', icon: LayoutDashboard },
     { name: 'البطولات الإقليمية', href: '/tournaments', icon: Trophy },
     { name: 'المؤسسات المشاركة', href: '/schools', icon: Users },
-    { name: 'فرق المؤسسة وتسجيل التلاميذ', href: '/teacher-teams', icon: GraduationCap },
+    { name: 'تسجيل الفرق والتلاميذ', href: '/teacher-teams', icon: GraduationCap },
     ...(isCentralAdmin || isTechCommitteeHead
       ? [{ name: 'رؤساء اللجن التقنية', href: '/tech-committee', icon: ShieldCheck }]
       : []),
@@ -179,7 +179,7 @@ export const AppLayout: React.FC = () => {
             {!isSidebarCollapsed && (
               <div className="truncate">
                 <h1 className="text-xs font-bold leading-tight text-white truncate">مديرية تاوريرت</h1>
-                <p className="text-[10px] text-slate-400 font-medium truncate">الجامعة الملكية للرياضة المدرسية</p>
+                <p className="text-[10px] text-slate-400 font-medium truncate">الفرع الإقليمي للجامعة الملكية للرياضة المدرسية</p>
               </div>
             )}
           </div>
@@ -276,14 +276,19 @@ export const AppLayout: React.FC = () => {
       <div className="flex flex-1 flex-col overflow-hidden">
         {/* Top Header - High Density Crisp Style */}
         <header className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-4 md:px-8 z-10 shadow-[0_1px_3px_rgba(0,0,0,0.02)]">
-          <div className="flex items-center gap-3">
-            {/* Mobile menu trigger */}
-            <button
-              onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
-              className="p-1.5 text-slate-500 hover:text-slate-800 md:hidden rounded-md hover:bg-slate-100 cursor-pointer"
-            >
-              {isMobileMenuOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
-            </button>
+          <div className="flex items-center gap-2 sm:gap-3">
+            {/* Mobile menu trigger & AppLogo */}
+            <div className="flex items-center gap-2 md:hidden">
+              <button
+                onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
+                className="p-1.5 text-slate-600 hover:text-slate-900 rounded-lg bg-slate-100/80 cursor-pointer"
+              >
+                {isMobileMenuOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
+              </button>
+              <div className="flex items-center gap-1.5">
+                <AppLogo size={32} />
+              </div>
+            </div>
 
             {/* Desktop toggle sidebar button */}
             <button
@@ -295,7 +300,7 @@ export const AppLayout: React.FC = () => {
               <span className="text-[11px] text-slate-500">{isSidebarCollapsed ? 'إظهار القائمة' : 'إخفاء'}</span>
             </button>
 
-            <h2 className="text-sm md:text-base font-bold text-slate-800">
+            <h2 className="text-xs sm:text-sm md:text-base font-bold text-slate-800 truncate">
               {isTeacher ? 'فضاء الأستاذ - المقابلات والنتائج' : 'لوحة التحكم والتدبير الإقليمي'}
             </h2>
             <span className="hidden sm:inline-flex px-2.5 py-0.5 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded text-[11px] font-bold">
@@ -344,23 +349,24 @@ export const AppLayout: React.FC = () => {
             {/* Notification Bell with Badge */}
             <div className="relative" ref={notificationsRef}>
               {unreadCount > 0 && (
-                <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 text-white text-[10px] flex items-center justify-center rounded-full border-2 border-white font-bold">
+                <span className="absolute -top-1 -right-1 w-5 h-5 bg-red-600 text-white text-[10px] flex items-center justify-center rounded-full border-2 border-white font-black z-10 shadow-xs animate-bounce">
                   {unreadCount}
                 </span>
               )}
               <button 
                 onClick={() => setIsNotificationsOpen(!isNotificationsOpen)}
+                title="الإشعارات والتنبيهات"
                 className={cn(
-                  "p-1.5 text-slate-400 hover:text-slate-600 rounded-md transition-colors cursor-pointer",
-                  isNotificationsOpen ? "bg-slate-100 text-slate-800" : "hover:bg-slate-100"
+                  "p-2 text-slate-600 hover:text-slate-900 rounded-xl transition-all cursor-pointer relative flex items-center justify-center border border-slate-200/80 bg-slate-50 hover:bg-slate-100",
+                  isNotificationsOpen ? "bg-blue-50 border-blue-300 text-blue-700 shadow-xs" : ""
                 )}
               >
-                <Bell className="h-5 w-5" />
+                <Bell className="h-5 w-5 text-slate-700" />
               </button>
               
-              {/* Notifications Dropdown */}
+              {/* Notifications Dropdown - Responsive positioning */}
               {isNotificationsOpen && (
-                <div className="absolute left-0 mt-2 w-72 bg-white rounded-xl shadow-lg border border-slate-200 overflow-hidden z-50">
+                <div className="fixed inset-x-3 top-16 sm:absolute sm:inset-auto sm:left-0 sm:top-full sm:mt-2 w-auto sm:w-80 bg-white rounded-2xl shadow-2xl border-2 border-blue-100 sm:border-slate-200 overflow-hidden z-50 animate-in fade-in zoom-in-95 duration-150">
                   <div className="flex items-center justify-between p-3 border-b border-slate-100 bg-slate-50/50">
                     <h3 className="text-sm font-bold text-slate-800">الإشعارات</h3>
                     {unreadCount > 0 && (

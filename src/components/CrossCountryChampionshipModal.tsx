@@ -288,7 +288,7 @@ export const CrossCountryChampionshipModal: React.FC<CrossCountryChampionshipMod
                   </span>
                 </div>
                 <p className="text-xs text-slate-300 mt-1 font-medium">
-                  المديرية الإقليمية تاوريرت • الجامعة الملكية المغربية للرياضة المدرسية
+                  المديرية الإقليمية تاوريرت • الفرع الإقليمي للجامعة الملكية للرياضة المدرسية
                 </p>
               </div>
             </div>

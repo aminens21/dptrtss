@@ -277,19 +277,39 @@ export const ScoreModal: React.FC<ScoreModalProps> = ({
           </div>
 
           {/* Status Selection */}
-          <div>
-            <label className="block text-xs font-bold text-slate-700 mb-1">حالة المقابلة</label>
-            <select
-              value={status}
-              onChange={(e) => setStatus(e.target.value as any)}
-              className="w-full text-xs rounded-lg border border-slate-200 px-3 py-2 text-slate-800 bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500 font-bold"
-            >
-              <option value="Completed">✅ انتهت المقابلة (تثبيت النتيجة النهائية وحفظها)</option>
-              <option value="Ongoing">⏱️ جارية حالياً (تحديث النتيجة المؤقتة مباشرة)</option>
-              <option value="Scheduled">🗓️ مبرمجة (لم تنطلق بعد)</option>
-              <option value="Postponed">⏸️ مؤجلة</option>
-              <option value="Cancelled">❌ ملغاة</option>
-            </select>
+          {/* Status Selection & Quick End Match Banner */}
+          <div className="space-y-2">
+            <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <p className="text-xs font-bold text-slate-800">حالة المقابلة: {status === 'Completed' ? '✅ انتهت المقابلة' : status === 'Ongoing' ? '⏱️ جارية (مباشر)' : '🗓️ مبرمجة'}</p>
+                <p className="text-[10px] text-slate-500">تحويل الحالة إلى "انتهت" يثبت النتيجة في الترتيب والإحصائيات</p>
+              </div>
+              {status !== 'Completed' && (
+                <button
+                  type="button"
+                  onClick={() => setStatus('Completed')}
+                  className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg transition-all cursor-pointer flex items-center gap-1 shadow-xs"
+                >
+                  <CheckCircle2 className="h-3.5 w-3.5" />
+                  <span>تغيير الحالة: انتهت المباراة</span>
+                </button>
+              )}
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1">تعديل حالة المقابلة يدويًا</label>
+              <select
+                value={status}
+                onChange={(e) => setStatus(e.target.value as any)}
+                className="w-full text-xs rounded-lg border border-slate-200 px-3 py-2 text-slate-800 bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500 font-bold"
+              >
+                <option value="Completed">✅ انتهت المقابلة (تثبيت النتيجة النهائية وحفظها)</option>
+                <option value="Ongoing">⏱️ جارية حالياً (تحديث النتيجة المؤقتة مباشرة)</option>
+                <option value="Scheduled">🗓️ مبرمجة (لم تنطلق بعد)</option>
+                <option value="Postponed">⏸️ مؤجلة</option>
+                <option value="Cancelled">❌ ملغاة</option>
+              </select>
+            </div>
           </div>
 
           {/* Scorers / Highlights */}

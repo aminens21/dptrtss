@@ -1,8 +1,8 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { DataService, SPORTS_MAP, AGE_CATEGORIES, getAgeCategoriesForSeason } from '../lib/dataService';
-import { Student, Sport } from '../types';
+import { Student, Sport, Tournament } from '../types';
 import {
   Users,
   Plus,
@@ -18,7 +18,9 @@ import {
   Clock,
   Sparkles,
   RefreshCw,
-  Search
+  Search,
+  CheckCircle2,
+  Trophy
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
@@ -31,12 +33,23 @@ export const TeacherTeams: React.FC = () => {
   // Data State
   const [sportsConfig, setSportsConfig] = useState<Sport[]>([]);
   const [students, setStudents] = useState<Student[]>([]);
+  const [tournaments, setTournaments] = useState<Tournament[]>([]);
   const [loading, setLoading] = useState(true);
   const [currentSeason, setCurrentSeason] = useState('2026/2027');
-  
-  // Selected Context
+
+  // Selected Context & Categorization Filter
   const [selectedSportId, setSelectedSportId] = useState<string | null>(urlSport || null);
-  
+  const [sportTabFilter, setSportTabFilter] = useState<'PROGRAMMED' | 'NON_PROGRAMMED' | 'ALL'>('PROGRAMMED');
+
+  // Classified Sports
+  const programmedSports = useMemo(() => {
+    return sportsConfig.filter(s => tournaments.some(t => t.sportId === s.id));
+  }, [sportsConfig, tournaments]);
+
+  const nonProgrammedSports = useMemo(() => {
+    return sportsConfig.filter(s => !tournaments.some(t => t.sportId === s.id));
+  }, [sportsConfig, tournaments]);
+
   // New Student Form State
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [editingStudentId, setEditingStudentId] = useState<string | null>(null);
@@ -61,13 +74,15 @@ export const TeacherTeams: React.FC = () => {
   const loadInitialData = async () => {
     setLoading(true);
     try {
-      const [config, allStudents, season] = await Promise.all([
+      const [config, allStudents, season, tournList] = await Promise.all([
         DataService.getSportsConfig(),
         DataService.getStudents(),
-        DataService.getActiveSeason()
+        DataService.getActiveSeason(),
+        DataService.getTournaments()
       ]);
       setSportsConfig(config);
       setCurrentSeason(season);
+      setTournaments(tournList);
       
       // Filter students of this teacher's school only, or from urlSchool if specified
       const targetSchool = userProfile?.workLocation || urlSchool;
@@ -185,7 +200,24 @@ export const TeacherTeams: React.FC = () => {
     return '3000 م';
   };
 
+  // Helpers for checking regional tournament existence
+  const hasActiveTournament = (sportId: string): boolean => {
+    return tournaments.some(t => t.sportId === sportId);
+  };
+
+  const getSportTournament = (sportId: string): Tournament | undefined => {
+    return tournaments.find(t => t.sportId === sportId);
+  };
+
   const handleOpenNewStudentForm = () => {
+    if (!selectedSportId) return;
+
+    if (!hasActiveTournament(selectedSportId)) {
+      const sportName = SPORTS_MAP[selectedSportId]?.name || selectedSportId;
+      toast.error(`لا يمكنك تسجيل التلاميذ لعدم وجود بطولة إقليمية مبرمجة حالياً لـ (${sportName}). يجب إنشاء وبرمجة البطولة أولاً من طرف الإدارة الإقليمية.`);
+      return;
+    }
+
     setEditingStudentId(null);
     setFullName('');
     setBirthDate('');
@@ -259,6 +291,12 @@ export const TeacherTeams: React.FC = () => {
     e.preventDefault();
 
     if (!selectedSportId) return;
+
+    if (!hasActiveTournament(selectedSportId)) {
+      const sportName = SPORTS_MAP[selectedSportId]?.name || selectedSportId;
+      toast.error(`خطأ في التسجيل: لا توجد بطولة إقليمية مبرمجة لـ (${sportName}). لا يمكن تسجيل التلاميذ إلا بعد برمجة البطولة رسمياً.`);
+      return;
+    }
 
     if (!fullName.trim()) {
       toast.error('يرجى إدخال الإسم والنسب للتلميذ');
@@ -459,6 +497,61 @@ export const TeacherTeams: React.FC = () => {
   }
 
   // If profile is incomplete, force profile updates
+  const renderSportCard = (sport: Sport) => {
+    const mapped = SPORTS_MAP[sport.id] || { name: sport.name, icon: '🏆' };
+    const count = students.filter(s => s.sportId === sport.id).length;
+    const hasConfiguredCategories = sport.ageCategories && sport.ageCategories.length > 0;
+    const tourn = getSportTournament(sport.id);
+    const isProgrammed = !!tourn;
+
+    return (
+      <div
+        key={sport.id}
+        onClick={() => handleSelectSport(sport.id)}
+        className={`bg-white rounded-2xl border p-5 transition-all cursor-pointer flex flex-col justify-between h-48 group relative overflow-hidden ${
+          isProgrammed
+            ? 'border-emerald-200 hover:border-emerald-500 hover:shadow-md bg-gradient-to-b from-white to-emerald-50/20'
+            : 'border-slate-200/80 hover:border-amber-400 hover:shadow-xs opacity-90'
+        }`}
+      >
+        <div className="absolute top-0 right-0 w-24 h-24 bg-blue-500/5 rounded-full -mr-8 -mt-8 group-hover:scale-125 transition-transform" />
+        
+        <div className="space-y-2">
+          <div className="flex items-center justify-between">
+            <span className="text-3xl block">{mapped.icon}</span>
+            {isProgrammed ? (
+              <span className="text-[9px] font-black px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-200 shadow-xs">
+                ✅ بطولة مبرمجة
+              </span>
+            ) : (
+              <span className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-900 border border-amber-200">
+                ⏳ غير مبرمجة بعد
+              </span>
+            )}
+          </div>
+          
+          <h4 className="text-xs md:text-sm font-bold text-slate-800 group-hover:text-blue-600 transition-colors">
+            {mapped.name}
+          </h4>
+          <p className="text-[10px] text-slate-400 font-medium line-clamp-1">
+            {hasConfiguredCategories 
+              ? `الفئات: ${sport.ageCategories?.map(getCategoryLabel).join(' - ')}`
+              : 'لم يتم تفعيل أي فئة'}
+          </p>
+        </div>
+
+        <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-[11px]">
+          <span className="text-slate-500 font-bold">المسجلون بالفريق:</span>
+          <span className={`font-bold px-2 py-0.5 rounded border ${
+            count > 0 ? 'text-blue-700 bg-blue-50 border-blue-200' : 'text-slate-400 bg-slate-50 border-slate-200'
+          }`}>
+            {count} تلاميذ
+          </span>
+        </div>
+      </div>
+    );
+  };
+
   if (isProfileIncomplete) {
     return (
       <div className="max-w-xl mx-auto mt-8 bg-white p-6 md:p-8 rounded-2xl border border-slate-200/80 shadow-md text-center space-y-4" dir="rtl">
@@ -490,14 +583,14 @@ export const TeacherTeams: React.FC = () => {
           <div className="flex items-center gap-2">
             <h2 className="text-base md:text-lg font-bold text-slate-800 flex items-center gap-2">
               <Users className="h-5 w-5 text-blue-600" />
-              <span>فضاء تسجيل فرق ومؤطري المؤسسة</span>
+              <span>فضاء تسجيل الفرق والتلاميذ (المؤطرون والتلاميذ)</span>
             </h2>
             <span className="text-[10px] bg-emerald-50 text-emerald-700 font-bold px-2.5 py-0.5 rounded border border-emerald-200">
               {schoolName}
             </span>
           </div>
           <p className="text-xs text-slate-500 mt-1.5 leading-relaxed">
-            مرحباً بك يا أستاذ. يمكنك الآن الدخول إلى أي تخصص رياضي تريده لتسجيل لائحة تلاميذ مؤسستك المشاركين في المسابقات الإقليمية.
+            مرحباً بك يا أستاذ (مؤطر المؤسسة). يتم التسجيل القبلي لمؤطري المؤسسات بالمنصة، ويمكنك هنا تسجيل وتشكيل لائحة فرق وتلاميذ مؤسستك في البطولات الإقليمية المبرمجة.
           </p>
         </div>
         <button
@@ -511,46 +604,138 @@ export const TeacherTeams: React.FC = () => {
 
       {/* Main Layout Screen */}
       {!selectedSportId ? (
-        // Mode 1: Selection of Sport
-        <div className="space-y-4">
-          <h3 className="text-xs font-bold text-slate-700 tracking-wider">اختر التخصص الرياضي الذي تريد تسجيل فريق مؤسستك فيه:</h3>
-          
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            {sportsConfig.map((sport) => {
-              const mapped = SPORTS_MAP[sport.id] || { name: sport.name, icon: '🏆' };
-              const count = students.filter(s => s.sportId === sport.id).length;
-              const hasConfiguredCategories = sport.ageCategories && sport.ageCategories.length > 0;
+        // Mode 1: Selection of Sport with Classification (Programmed vs Non-Programmed)
+        <div className="space-y-5">
+          {/* Classification Navigation Tabs */}
+          <div className="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-xs space-y-3">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div>
+                <h3 className="text-xs sm:text-sm font-bold text-slate-800">
+                  تصنيف الرياضات حسب البرمجة الإقليمية
+                </h3>
+                <p className="text-[11px] text-slate-500 mt-0.5">
+                  تتيح المنظومة تسجيل الفرق فقط في الرياضات ذات البطولات المبرمجة رسمياً.
+                </p>
+              </div>
+            </div>
 
-              return (
-                <div
-                  key={sport.id}
-                  onClick={() => handleSelectSport(sport.id)}
-                  className="bg-white rounded-2xl border border-slate-200/80 p-5 hover:border-blue-500 hover:shadow-md transition-all cursor-pointer flex flex-col justify-between h-40 group relative overflow-hidden"
-                >
-                  <div className="absolute top-0 right-0 w-24 h-24 bg-blue-500/5 rounded-full -mr-8 -mt-8 group-hover:scale-125 transition-transform" />
-                  
-                  <div className="space-y-2">
-                    <span className="text-3xl block">{mapped.icon}</span>
-                    <h4 className="text-xs md:text-sm font-bold text-slate-800 group-hover:text-blue-600 transition-colors">
-                      {mapped.name}
-                    </h4>
-                    <p className="text-[10px] text-slate-400 font-medium">
-                      {hasConfiguredCategories 
-                        ? `الفئات المفعلة: ${sport.ageCategories?.map(getCategoryLabel).join(' - ')}`
-                        : 'لم يتم تفعيل أي فئة بعد'}
-                    </p>
-                  </div>
+            {/* Filter Tabs */}
+            <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => setSportTabFilter('PROGRAMMED')}
+                className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-2 border ${
+                  sportTabFilter === 'PROGRAMMED'
+                    ? 'bg-emerald-600 text-white border-emerald-600 shadow-xs'
+                    : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
+                }`}
+              >
+                <span>🏆 الرياضات والبطولات المبرمجة (المتاحة للتسجيل)</span>
+                <span className={`px-2 py-0.5 rounded-full text-[10px] font-black ${
+                  sportTabFilter === 'PROGRAMMED' ? 'bg-white/20 text-white' : 'bg-emerald-100 text-emerald-800'
+                }`}>
+                  {programmedSports.length}
+                </span>
+              </button>
 
-                  <div className="pt-3 border-t border-slate-100 flex items-center justify-between text-[11px]">
-                    <span className="text-slate-500 font-bold">المسجلون بالفريق:</span>
-                    <span className="font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded border border-blue-100">
-                      {count} تلاميذ
-                    </span>
-                  </div>
-                </div>
-              );
-            })}
+              <button
+                type="button"
+                onClick={() => setSportTabFilter('NON_PROGRAMMED')}
+                className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-2 border ${
+                  sportTabFilter === 'NON_PROGRAMMED'
+                    ? 'bg-amber-600 text-white border-amber-600 shadow-xs'
+                    : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
+                }`}
+              >
+                <span>⏳ الرياضات غير المبرمجة حالياً</span>
+                <span className={`px-2 py-0.5 rounded-full text-[10px] font-black ${
+                  sportTabFilter === 'NON_PROGRAMMED' ? 'bg-white/20 text-white' : 'bg-amber-100 text-amber-800'
+                }`}>
+                  {nonProgrammedSports.length}
+                </span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setSportTabFilter('ALL')}
+                className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-2 border ${
+                  sportTabFilter === 'ALL'
+                    ? 'bg-blue-600 text-white border-blue-600 shadow-xs'
+                    : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
+                }`}
+              >
+                <span>عرض الكل ({sportsConfig.length})</span>
+              </button>
+            </div>
           </div>
+
+          {/* Tab Content Rendering */}
+          {sportTabFilter === 'PROGRAMMED' && (
+            <div className="space-y-3">
+              <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-emerald-900 text-xs font-medium flex items-center gap-2">
+                <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
+                <span>هذه الرياضات مبرمجة رسمياً في أجندة البطولة الإقليمية ويمكنك إضافة وتعديل لائحة فرق وتلاميذ المؤسسة بها مباشرة.</span>
+              </div>
+
+              {programmedSports.length > 0 ? (
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                  {programmedSports.map(renderSportCard)}
+                </div>
+              ) : (
+                <div className="p-8 text-center bg-white rounded-2xl border border-slate-200/80 space-y-2">
+                  <Trophy className="h-10 w-10 text-slate-300 mx-auto" />
+                  <p className="text-xs font-bold text-slate-700">لا توجد بطولات مبرمجة حالياً في هذه اللحظة</p>
+                  <p className="text-[11px] text-slate-500">سيتم فتح التسجيل تلقائياً بمجرد قيام الإدارة ببرمجة مواعيد البطولات الإقليمية.</p>
+                </div>
+              )}
+            </div>
+          )}
+
+          {sportTabFilter === 'NON_PROGRAMMED' && (
+            <div className="space-y-3">
+              <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-amber-900 text-xs font-medium flex items-center gap-2">
+                <AlertCircle className="h-4 w-4 text-amber-600 shrink-0" />
+                <span>هذه الرياضات لم تُبرمج بطولتها الإقليمية بعد. يمكنك الاطلاع عليها ولكن لا يمكن إضافة التلاميذ حتى تقوم الإدارة ببرمجتها.</span>
+              </div>
+
+              {nonProgrammedSports.length > 0 ? (
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                  {nonProgrammedSports.map(renderSportCard)}
+                </div>
+              ) : (
+                <div className="p-8 text-center bg-white rounded-2xl border border-slate-200/80 space-y-2">
+                  <CheckCircle2 className="h-10 w-10 text-emerald-400 mx-auto" />
+                  <p className="text-xs font-bold text-slate-700">جميع الرياضات المعتمدة مبرمجة حالياً!</p>
+                </div>
+              )}
+            </div>
+          )}
+
+          {sportTabFilter === 'ALL' && (
+            <div className="space-y-6">
+              {/* Programmed Section */}
+              <div className="space-y-3">
+                <div className="flex items-center gap-2 bg-emerald-50/60 p-2.5 rounded-xl border border-emerald-100">
+                  <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+                  <h4 className="text-xs font-black text-emerald-900">1. الرياضات والبطولات المبرمجة ({programmedSports.length}) - متاحة للتسجيل الفوري</h4>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                  {programmedSports.map(renderSportCard)}
+                </div>
+              </div>
+
+              {/* Non-Programmed Section */}
+              <div className="space-y-3 pt-4 border-t border-slate-200">
+                <div className="flex items-center gap-2 bg-amber-50/60 p-2.5 rounded-xl border border-amber-100">
+                  <AlertCircle className="h-4 w-4 text-amber-600" />
+                  <h4 className="text-xs font-black text-amber-900">2. الرياضات غير المبرمجة حالياً ({nonProgrammedSports.length}) - في انتظار البرمجة</h4>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                  {nonProgrammedSports.map(renderSportCard)}
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       ) : (
         // Mode 2: Sport Workspace
@@ -582,14 +767,28 @@ export const TeacherTeams: React.FC = () => {
               </span>
               <button
                 onClick={handleOpenNewStudentForm}
-                disabled={!activeSportCategories || activeSportCategories.length === 0}
-                className="bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs px-4 py-2 rounded-xl shadow-xs flex items-center gap-1.5 transition-colors disabled:opacity-50"
+                disabled={!activeSportCategories || activeSportCategories.length === 0 || !hasActiveTournament(selectedSportId)}
+                title={!hasActiveTournament(selectedSportId) ? 'لا توجد بطولة إقليمية مبرمجة بعد لهذه الرياضة' : 'إضافة تلميذ جديد'}
+                className="bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs px-4 py-2 rounded-xl shadow-xs flex items-center gap-1.5 transition-colors disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
               >
                 <Plus className="h-4 w-4" />
                 <span>إضافة تلميذ جديد</span>
               </button>
             </div>
           </div>
+
+          {/* Alert if no active tournament exists */}
+          {!hasActiveTournament(selectedSportId) && (
+            <div className="p-4 bg-amber-50 border border-amber-200 rounded-2xl flex items-start gap-3 text-amber-900 text-xs leading-relaxed shadow-xs">
+              <AlertCircle className="h-5 w-5 shrink-0 text-amber-600 mt-0.5" />
+              <div>
+                <p className="font-extrabold text-sm">⚠️ تنبيه تنظيماتي: لا توجد بطولة إقليمية مبرمجة لـ ({getSportName(selectedSportId)})!</p>
+                <p className="mt-1 text-slate-700 font-medium">
+                  وفق القوانين المنظمة للفرع الإقليمي، يتم تسجيل التلاميذ بالبطولة الإقليمية للرياضة المعنية حصراً، ولا يمكن تسجيل تلميذ إذا لم تكن البطولة الإقليمية موجودة أو مبرمجة رسمياً.
+                </p>
+              </div>
+            </div>
+          )}
 
           {/* Alert if sport categories aren't configured yet */}
           {(!activeSportCategories || activeSportCategories.length === 0) && (

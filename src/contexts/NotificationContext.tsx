@@ -274,9 +274,25 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
 
   const markAsRead = async (id: string) => {
     if (!userProfile) return;
-    await DataService.markNotificationAsRead(id, userProfile.id);
     
-    setNotifications((prev) =>
+    // Update local notifications state and recalculate unreadCount immediately
+    setNotifications((prev) => {
+      const updated = prev.map((n) => {
+        if (n.id === id) {
+          const currentReadBy = n.readBy || [];
+          if (!currentReadBy.includes(userProfile.id)) {
+            return { ...n, readBy: [...currentReadBy, userProfile.id] };
+          }
+        }
+        return n;
+      });
+      const unread = updated.filter((n) => !n.readBy?.includes(userProfile.id)).length;
+      setUnreadCount(unread);
+      return updated;
+    });
+
+    // Sync allRawNotifications so background effect doesn't revert unread state
+    setAllRawNotifications((prev) =>
       prev.map((n) => {
         if (n.id === id) {
           const currentReadBy = n.readBy || [];
@@ -287,13 +303,16 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
         return n;
       })
     );
+
+    await DataService.markNotificationAsRead(id, userProfile.id);
   };
 
   const markAllAsRead = async () => {
     if (!userProfile) return;
     const unreadNotifs = notifications.filter((n) => !n.readBy?.includes(userProfile.id));
-    
-    await Promise.all(unreadNotifs.map((n) => DataService.markNotificationAsRead(n.id, userProfile.id)));
+
+    // Immediately clear unreadCount so badge on bell disappears instantly
+    setUnreadCount(0);
 
     setNotifications((prev) =>
       prev.map((n) => {
@@ -304,6 +323,18 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
         return n;
       })
     );
+
+    setAllRawNotifications((prev) =>
+      prev.map((n) => {
+        const currentReadBy = n.readBy || [];
+        if (!currentReadBy.includes(userProfile.id)) {
+          return { ...n, readBy: [...currentReadBy, userProfile.id] };
+        }
+        return n;
+      })
+    );
+
+    await Promise.all(unreadNotifs.map((n) => DataService.markNotificationAsRead(n.id, userProfile.id)));
   };
 
   return (

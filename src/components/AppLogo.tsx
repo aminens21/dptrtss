@@ -168,9 +168,9 @@ export const AppLogo: React.FC<AppLogoProps> = ({ className = '', size = 44, sho
             d="M 18 162 Q 100 216 182 162"
             fill="none"
           />
-          <text fill="#ffffff" fontSize="9.5" fontWeight="900" fontFamily="'Tajawal', 'Cairo', sans-serif">
+          <text fill="#ffffff" fontSize="8.5" fontWeight="900" fontFamily="'Tajawal', 'Cairo', sans-serif">
             <textPath href="#textPathGreen" startOffset="50%" textAnchor="middle">
-              الجامعة الملكية المغربية للرياضة المدرسية
+              الفرع الإقليمي للجامعة الملكية للرياضة المدرسية
             </textPath>
           </text>
         </g>
@@ -204,7 +204,7 @@ export const AppLogo: React.FC<AppLogoProps> = ({ className = '', size = 44, sho
 
       {showText && (
         <div className="flex flex-col text-right">
-          <span className="text-sm font-black text-slate-900 leading-tight">الجامعة الملكية المغربية</span>
+          <span className="text-sm font-black text-slate-900 leading-tight">الفرع الإقليمي للجامعة الملكية</span>
           <span className="text-xs font-bold text-blue-700 leading-none">للرياضة المدرسية • تاوريرت</span>
         </div>
       )}
