@@ -44,7 +44,30 @@ export const Tournaments: React.FC = () => {
   const isCentralAdmin = userProfile?.role === 'CENTRAL_ADMIN';
   const isSportManager = userProfile?.role === 'SPORT_MANAGER';
   const isTechCommitteeHead = userProfile?.isTechCommitteeHead === true;
-  const canCreate = isCentralAdmin || isTechCommitteeHead;
+
+  // Allowed sport IDs for technical committee head
+  const allowedSportIds = useMemo(() => {
+    if (isCentralAdmin) return null; // null means unrestricted
+    if (isTechCommitteeHead) {
+      const list: string[] = [];
+      if (userProfile?.techCommitteeSports && userProfile.techCommitteeSports.length > 0) {
+        list.push(...userProfile.techCommitteeSports);
+      }
+      if (userProfile?.sportId && !list.includes(userProfile.sportId)) {
+        list.push(userProfile.sportId);
+      }
+      return list;
+    }
+    return [];
+  }, [isCentralAdmin, isTechCommitteeHead, userProfile]);
+
+  const canCreate = isCentralAdmin || (isTechCommitteeHead && (allowedSportIds === null || allowedSportIds.length > 0));
+
+  const canManageTournament = (t: Tournament) => {
+    if (isCentralAdmin) return true;
+    if (isTechCommitteeHead && allowedSportIds && allowedSportIds.includes(t.sportId)) return true;
+    return false;
+  };
 
   // Determine manager sport specialty
   const managerSportId = useMemo(() => {
@@ -680,7 +703,7 @@ export const Tournaments: React.FC = () => {
                         </button>
                       )}
 
-                      {canCreate && (
+                      {canManageTournament(t) && (
                         <button
                           onClick={(e) => promptDeleteTournament(t, e)}
                           title="حذف البطولة"
@@ -716,6 +739,7 @@ export const Tournaments: React.FC = () => {
       <CreateTournamentModal
         isOpen={isModalOpen}
         onClose={() => setIsModalOpen(false)}
+        allowedSportIds={allowedSportIds}
         onCreated={handleCreateTournament}
       />
 

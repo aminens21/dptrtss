@@ -40,7 +40,7 @@ export const Matches: React.FC = () => {
   const canCreate = isCentralAdmin || isSportManager || isTechCommitteeHead;
   const canEditScore = isCentralAdmin || isSportManager || isTechCommitteeHead;
 
-  // Determine manager sport specialty
+  // Determine manager or tech head sport specialty restriction
   const managerSportId = useMemo(() => {
     if (userProfile?.role !== 'SPORT_MANAGER') return undefined;
     if (userProfile.sportId) return userProfile.sportId;
@@ -50,6 +50,18 @@ export const Matches: React.FC = () => {
     );
     return assignedTourn?.sportId || 'basketball';
   }, [userProfile, tournaments]);
+
+  const restrictedSportId = useMemo(() => {
+    if (isCentralAdmin) return undefined;
+    if (isSportManager) return managerSportId;
+    if (isTechCommitteeHead) {
+      if (userProfile?.techCommitteeSports && userProfile.techCommitteeSports.length > 0) {
+        return userProfile.techCommitteeSports[0];
+      }
+      return userProfile?.sportId;
+    }
+    return undefined;
+  }, [isCentralAdmin, isSportManager, isTechCommitteeHead, managerSportId, userProfile]);
 
   // Determine user's primary/preferred sport specialty for automatic focus on login
   const preferredSportId = useMemo(() => {
@@ -650,7 +662,7 @@ export const Matches: React.FC = () => {
         venues={venues}
         tournaments={tournaments}
         matches={matches}
-        managerSportId={managerSportId}
+        managerSportId={restrictedSportId}
         onSave={handleCreateMatch}
         editingMatch={editingMatch}
       />

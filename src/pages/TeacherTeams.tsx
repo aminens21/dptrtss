@@ -604,136 +604,36 @@ export const TeacherTeams: React.FC = () => {
 
       {/* Main Layout Screen */}
       {!selectedSportId ? (
-        // Mode 1: Selection of Sport with Classification (Programmed vs Non-Programmed)
-        <div className="space-y-5">
-          {/* Classification Navigation Tabs */}
-          <div className="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-xs space-y-3">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-              <div>
-                <h3 className="text-xs sm:text-sm font-bold text-slate-800">
-                  تصنيف الرياضات حسب البرمجة الإقليمية
-                </h3>
-                <p className="text-[11px] text-slate-500 mt-0.5">
-                  تتيح المنظومة تسجيل الفرق فقط في الرياضات ذات البطولات المبرمجة رسمياً.
-                </p>
-              </div>
+        // Mode 1: Selection of Programmed Sports Only
+        <div className="space-y-4">
+          <div className="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div>
+              <h3 className="text-xs sm:text-sm font-bold text-slate-800 flex items-center gap-2">
+                <Trophy className="h-4 w-4 text-emerald-600" />
+                <span>الرياضات المبرمجة المتاحة لتسجيل الفرق والتلاميذ</span>
+              </h3>
+              <p className="text-[11px] text-slate-500 mt-0.5">
+                تُعرض هنا حصرياً الرياضات التي قام المسير المركزي ورؤساء اللجن التقنية ببرمجة بطولاتها الإقليمية رسمياً.
+              </p>
             </div>
-
-            {/* Filter Tabs */}
-            <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-slate-100">
-              <button
-                type="button"
-                onClick={() => setSportTabFilter('PROGRAMMED')}
-                className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-2 border ${
-                  sportTabFilter === 'PROGRAMMED'
-                    ? 'bg-emerald-600 text-white border-emerald-600 shadow-xs'
-                    : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
-                }`}
-              >
-                <span>🏆 الرياضات والبطولات المبرمجة (المتاحة للتسجيل)</span>
-                <span className={`px-2 py-0.5 rounded-full text-[10px] font-black ${
-                  sportTabFilter === 'PROGRAMMED' ? 'bg-white/20 text-white' : 'bg-emerald-100 text-emerald-800'
-                }`}>
-                  {programmedSports.length}
-                </span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setSportTabFilter('NON_PROGRAMMED')}
-                className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-2 border ${
-                  sportTabFilter === 'NON_PROGRAMMED'
-                    ? 'bg-amber-600 text-white border-amber-600 shadow-xs'
-                    : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
-                }`}
-              >
-                <span>⏳ الرياضات غير المبرمجة حالياً</span>
-                <span className={`px-2 py-0.5 rounded-full text-[10px] font-black ${
-                  sportTabFilter === 'NON_PROGRAMMED' ? 'bg-white/20 text-white' : 'bg-amber-100 text-amber-800'
-                }`}>
-                  {nonProgrammedSports.length}
-                </span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setSportTabFilter('ALL')}
-                className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-2 border ${
-                  sportTabFilter === 'ALL'
-                    ? 'bg-blue-600 text-white border-blue-600 shadow-xs'
-                    : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
-                }`}
-              >
-                <span>عرض الكل ({sportsConfig.length})</span>
-              </button>
-            </div>
+            <span className="self-start sm:self-auto text-[10px] bg-emerald-50 text-emerald-800 font-bold px-3 py-1 rounded-full border border-emerald-200 shrink-0">
+              {programmedSports.length} رياضات مبرمجة
+            </span>
           </div>
 
-          {/* Tab Content Rendering */}
-          {sportTabFilter === 'PROGRAMMED' && (
-            <div className="space-y-3">
-              <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-emerald-900 text-xs font-medium flex items-center gap-2">
-                <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
-                <span>هذه الرياضات مبرمجة رسمياً في أجندة البطولة الإقليمية ويمكنك إضافة وتعديل لائحة فرق وتلاميذ المؤسسة بها مباشرة.</span>
-              </div>
-
-              {programmedSports.length > 0 ? (
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                  {programmedSports.map(renderSportCard)}
-                </div>
-              ) : (
-                <div className="p-8 text-center bg-white rounded-2xl border border-slate-200/80 space-y-2">
-                  <Trophy className="h-10 w-10 text-slate-300 mx-auto" />
-                  <p className="text-xs font-bold text-slate-700">لا توجد بطولات مبرمجة حالياً في هذه اللحظة</p>
-                  <p className="text-[11px] text-slate-500">سيتم فتح التسجيل تلقائياً بمجرد قيام الإدارة ببرمجة مواعيد البطولات الإقليمية.</p>
-                </div>
-              )}
+          {programmedSports.length > 0 ? (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              {programmedSports.map(renderSportCard)}
             </div>
-          )}
-
-          {sportTabFilter === 'NON_PROGRAMMED' && (
-            <div className="space-y-3">
-              <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-amber-900 text-xs font-medium flex items-center gap-2">
-                <AlertCircle className="h-4 w-4 text-amber-600 shrink-0" />
-                <span>هذه الرياضات لم تُبرمج بطولتها الإقليمية بعد. يمكنك الاطلاع عليها ولكن لا يمكن إضافة التلاميذ حتى تقوم الإدارة ببرمجتها.</span>
+          ) : (
+            <div className="p-10 text-center bg-white rounded-2xl border border-slate-200/80 space-y-3 shadow-xs">
+              <div className="w-12 h-12 rounded-2xl bg-amber-50 border border-amber-100 flex items-center justify-center mx-auto text-amber-600 text-xl font-bold">
+                ⏳
               </div>
-
-              {nonProgrammedSports.length > 0 ? (
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                  {nonProgrammedSports.map(renderSportCard)}
-                </div>
-              ) : (
-                <div className="p-8 text-center bg-white rounded-2xl border border-slate-200/80 space-y-2">
-                  <CheckCircle2 className="h-10 w-10 text-emerald-400 mx-auto" />
-                  <p className="text-xs font-bold text-slate-700">جميع الرياضات المعتمدة مبرمجة حالياً!</p>
-                </div>
-              )}
-            </div>
-          )}
-
-          {sportTabFilter === 'ALL' && (
-            <div className="space-y-6">
-              {/* Programmed Section */}
-              <div className="space-y-3">
-                <div className="flex items-center gap-2 bg-emerald-50/60 p-2.5 rounded-xl border border-emerald-100">
-                  <CheckCircle2 className="h-4 w-4 text-emerald-600" />
-                  <h4 className="text-xs font-black text-emerald-900">1. الرياضات والبطولات المبرمجة ({programmedSports.length}) - متاحة للتسجيل الفوري</h4>
-                </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                  {programmedSports.map(renderSportCard)}
-                </div>
-              </div>
-
-              {/* Non-Programmed Section */}
-              <div className="space-y-3 pt-4 border-t border-slate-200">
-                <div className="flex items-center gap-2 bg-amber-50/60 p-2.5 rounded-xl border border-amber-100">
-                  <AlertCircle className="h-4 w-4 text-amber-600" />
-                  <h4 className="text-xs font-black text-amber-900">2. الرياضات غير المبرمجة حالياً ({nonProgrammedSports.length}) - في انتظار البرمجة</h4>
-                </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                  {nonProgrammedSports.map(renderSportCard)}
-                </div>
-              </div>
+              <h4 className="text-sm font-bold text-slate-800">لا توجد بطولات أو رياضات مبرمجة حالياً</h4>
+              <p className="text-xs text-slate-500 max-w-md mx-auto leading-relaxed">
+                لم يتم إدراج أي رياضة أو بطولة إقليمية جديدة بعد من طرف المسير المركزي واللجن التقنية. سيتم فتح باب تسجيل الفرق والتلاميذ فور إدراج البطولات بالمنصة.
+              </p>
             </div>
           )}
         </div>

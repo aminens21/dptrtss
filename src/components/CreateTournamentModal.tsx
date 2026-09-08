@@ -7,12 +7,14 @@ import toast from 'react-hot-toast';
 interface CreateTournamentModalProps {
   isOpen: boolean;
   onClose: () => void;
+  allowedSportIds?: string[] | null;
   onCreated: (tournaments: Omit<Tournament, 'id'>[]) => Promise<void>;
 }
 
 export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
   isOpen,
   onClose,
+  allowedSportIds,
   onCreated
 }) => {
   const [name, setName] = useState('');
@@ -46,6 +48,22 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
         });
     }
   }, [isOpen]);
+
+  // Filter sports based on allowedSportIds for Tech Committee Head
+  const availableSports = React.useMemo(() => {
+    if (!allowedSportIds || allowedSportIds.length === 0) return sportsConfig;
+    return sportsConfig.filter(s => allowedSportIds.includes(s.id));
+  }, [sportsConfig, allowedSportIds]);
+
+  // Auto-set sportId to the first allowed sport when available sports change
+  useEffect(() => {
+    if (availableSports.length > 0) {
+      const isCurrentValid = availableSports.some(s => s.id === sportId);
+      if (!isCurrentValid) {
+        setSportId(availableSports[0].id);
+      }
+    }
+  }, [availableSports]);
 
   const seasonalCategories = getAgeCategoriesForSeason(currentSeason);
   const activeSportConfig = sportsConfig.find(s => s.id === sportId);
@@ -93,6 +111,11 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
 
     if (!name.trim()) {
       toast.error('يرجى إدخال اسم البطولة الأساسي');
+      return;
+    }
+
+    if (allowedSportIds && allowedSportIds.length > 0 && !allowedSportIds.includes(sportId)) {
+      toast.error('غير مسموح لك بإضافة بطولة في هذه الرياضة. يمكنك الإضافة فقط في تخصصك المسند.');
       return;
     }
 
@@ -230,20 +253,27 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
               <select
                 value={sportId}
                 onChange={(e) => setSportId(e.target.value)}
-                className="w-full text-xs rounded-lg border border-slate-200 px-3 py-2 text-slate-800 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full text-xs rounded-lg border border-slate-200 px-3 py-2 text-slate-800 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 font-medium"
               >
-                {sportsConfig.length > 0
-                  ? sportsConfig.map((s) => (
+                {availableSports.length > 0
+                  ? availableSports.map((s) => (
                       <option key={s.id} value={s.id}>
                         {s.icon || SPORTS_MAP[s.id]?.icon || '🏆'} {s.name}
                       </option>
                     ))
-                  : Object.entries(SPORTS_MAP).map(([id, info]) => (
-                      <option key={id} value={id}>
-                        {info.icon} {info.name}
-                      </option>
-                    ))}
+                  : Object.entries(SPORTS_MAP)
+                      .filter(([id]) => !allowedSportIds || allowedSportIds.includes(id))
+                      .map(([id, info]) => (
+                        <option key={id} value={id}>
+                          {info.icon} {info.name}
+                        </option>
+                      ))}
               </select>
+              {allowedSportIds && allowedSportIds.length > 0 && (
+                <span className="text-[10px] text-amber-700 font-bold block mt-1 bg-amber-50 p-1.5 rounded border border-amber-200">
+                  🔒 رئيس لجنة تقنية: مسند لك إضافة بطولات في تخصصك فقط.
+                </span>
+              )}
             </div>
 
             <div>
