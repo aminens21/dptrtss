@@ -1,0 +1,8 @@
+{
+  "name": "Remix الرياضة المدرسية – مديرية تاوريرت",
+  "description": "منصة رقمية مركزية لتدبير وتتبع الأنشطة والبطولات الرياضية المدرسية بالمديرية الإقليمية بتاوريرت",
+  "requestFramePermissions": ["camera"],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
