@@ -1,4 +1,5 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
+import { useAuth } from '../contexts/AuthContext';
 import { DataService, SPORTS_MAP } from '../lib/dataService';
 import { Referee } from '../types';
 import {
@@ -14,10 +15,45 @@ import {
 import toast from 'react-hot-toast';
 
 export const Referees: React.FC = () => {
+  const { userProfile } = useAuth();
   const [referees, setReferees] = useState<Referee[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedSport, setSelectedSport] = useState('');
+
+  // Determine user's primary/preferred sport specialty for automatic focus on login
+  const preferredSportId = useMemo(() => {
+    if (!userProfile) return '';
+    
+    // 1. Sport Manager
+    if (userProfile.role === 'SPORT_MANAGER') {
+      return userProfile.sportId || '';
+    }
+    
+    // 2. Technical Committee Head
+    if (userProfile.isTechCommitteeHead && userProfile.techCommitteeSports && userProfile.techCommitteeSports.length > 0) {
+      return userProfile.techCommitteeSports[0];
+    }
+    
+    // 3. Technical Committee Member
+    if (userProfile.isTechCommitteeMember && userProfile.techCommitteeSportsMemberOf && userProfile.techCommitteeSportsMemberOf.length > 0) {
+      return userProfile.techCommitteeSportsMemberOf[0];
+    }
+    
+    // 4. Fallback userProfile.sportId
+    if (userProfile.sportId) {
+      return userProfile.sportId;
+    }
+    
+    return '';
+  }, [userProfile]);
+
+  // Set initial selected sport to user preferred specialty upon login/data load
+  useEffect(() => {
+    if (preferredSportId) {
+      setSelectedSport(preferredSportId);
+    }
+  }, [preferredSportId]);
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingRef, setEditingRef] = useState<Referee | null>(null);

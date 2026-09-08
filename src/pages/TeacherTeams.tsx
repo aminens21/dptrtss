@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { DataService, SPORTS_MAP, AGE_CATEGORIES, getAgeCategoriesForSeason } from '../lib/dataService';
 import { Student, Sport } from '../types';
@@ -23,6 +24,9 @@ import toast from 'react-hot-toast';
 
 export const TeacherTeams: React.FC = () => {
   const { userProfile, openProfileModal } = useAuth();
+  const [searchParams] = useSearchParams();
+  const urlSport = searchParams.get('sport');
+  const urlSchool = searchParams.get('school');
   
   // Data State
   const [sportsConfig, setSportsConfig] = useState<Sport[]>([]);
@@ -31,20 +35,24 @@ export const TeacherTeams: React.FC = () => {
   const [currentSeason, setCurrentSeason] = useState('2026/2027');
   
   // Selected Context
-  const [selectedSportId, setSelectedSportId] = useState<string | null>(null);
+  const [selectedSportId, setSelectedSportId] = useState<string | null>(urlSport || null);
   
   // New Student Form State
   const [isFormOpen, setIsFormOpen] = useState(false);
+  const [editingStudentId, setEditingStudentId] = useState<string | null>(null);
   const [fullName, setFullName] = useState('');
   const [gender, setGender] = useState<'Male' | 'Female'>('Male');
   const [birthDate, setBirthDate] = useState('');
   const [category, setCategory] = useState('');
+  const [participationType, setParticipationType] = useState<'individual' | 'school_team'>('individual');
+  const [athleticsSpecialty, setAthleticsSpecialty] = useState('');
   const [photo, setPhoto] = useState<string>('');
   const [uploading, setUploading] = useState(false);
+  const [studentToDeleteId, setStudentToDeleteId] = useState<string | null>(null);
 
   // Verification: Teacher profile completeness
   const isProfileIncomplete = userProfile?.role === 'TEACHER' && (!userProfile.workLocation || !userProfile.leaseNumber);
-  const schoolName = userProfile?.workLocation || 'مؤسسة غير محددة';
+  const schoolName = userProfile?.workLocation || urlSchool || 'مؤسسة غير محددة';
 
   useEffect(() => {
     loadInitialData();
@@ -61,11 +69,16 @@ export const TeacherTeams: React.FC = () => {
       setSportsConfig(config);
       setCurrentSeason(season);
       
-      // Filter students of this teacher's school only
-      if (userProfile?.workLocation) {
-         setStudents(allStudents.filter(s => s.schoolName === userProfile.workLocation));
+      // Filter students of this teacher's school only, or from urlSchool if specified
+      const targetSchool = userProfile?.workLocation || urlSchool;
+      if (targetSchool) {
+        setStudents(allStudents.filter(s => s.schoolName === targetSchool));
       } else {
         setStudents(allStudents);
+      }
+
+      if (urlSport) {
+        setSelectedSportId(urlSport);
       }
     } catch (error) {
       console.error('Error loading teacher team data:', error);
@@ -164,6 +177,84 @@ export const TeacherTeams: React.FC = () => {
     reader.readAsDataURL(file);
   };
 
+  const getCrossCountryDistance = (catId: string, g: 'Male' | 'Female'): string => {
+    if (catId === 'U12') return g === 'Female' ? '1000 م' : '1500 م';
+    if (catId === 'U15') return g === 'Female' ? '2000 م' : '3000 م';
+    if (catId === 'U18') return g === 'Female' ? '3000 م' : '4000 م';
+    if (catId === 'U20') return g === 'Female' ? '3000 م' : '5000 م';
+    return '3000 م';
+  };
+
+  const handleOpenNewStudentForm = () => {
+    setEditingStudentId(null);
+    setFullName('');
+    setBirthDate('');
+    setPhoto('');
+    setAthleticsSpecialty('');
+    
+    const sport = sportsConfig.find(s => s.id === selectedSportId);
+    if (sport && sport.ageCategories && sport.ageCategories.length > 0) {
+      setCategory(sport.ageCategories[0]);
+    } else {
+      setCategory('');
+    }
+    
+    setIsFormOpen(true);
+  };
+
+  const handleEditStudent = (student: Student) => {
+    setEditingStudentId(student.id);
+    setFullName(student.fullName);
+    setGender(student.gender);
+    setBirthDate(student.birthDate);
+    setCategory(student.category);
+    if (student.participationType) {
+      setParticipationType(student.participationType);
+    }
+    setPhoto(student.photoUrl || '');
+    if (student.athleticsSpecialty) {
+      setAthleticsSpecialty(student.athleticsSpecialty);
+    } else {
+      setAthleticsSpecialty('');
+    }
+    setIsFormOpen(true);
+  };
+
+  const handleBirthDateChange = (newDate: string) => {
+    setBirthDate(newDate);
+    if (!newDate) return;
+
+    const parts = newDate.split('-');
+    const year = parseInt(parts[0], 10);
+    if (isNaN(year) || year < 1990 || year > 2030) return;
+
+    const match = currentSeason.match(/(\d{4})/);
+    const startYear = match ? parseInt(match[1], 10) : 2026;
+
+    let detectedCatId = '';
+    if (year >= startYear - 11) {
+      detectedCatId = 'U12';
+    } else if (year >= startYear - 14 && year <= startYear - 12) {
+      detectedCatId = 'U15';
+    } else if (year >= startYear - 17 && year <= startYear - 15) {
+      detectedCatId = 'U18';
+    } else {
+      detectedCatId = 'U20';
+    }
+
+    if (detectedCatId) {
+      if (activeSportCategories.includes(detectedCatId)) {
+        setCategory(detectedCatId);
+      } else if (activeSportCategories.includes('OPEN')) {
+        setCategory('OPEN');
+      } else if (activeSportCategories.length > 0) {
+        setCategory(detectedCatId);
+      } else {
+        setCategory(detectedCatId);
+      }
+    }
+  };
+
   const handleAddStudent = async (e: React.FormEvent) => {
     e.preventDefault();
 
@@ -180,6 +271,36 @@ export const TeacherTeams: React.FC = () => {
     if (!category) {
       toast.error('يرجى تحديد الفئة الرياضية');
       return;
+    }
+
+    if (selectedSportId === 'athletics' && !athleticsSpecialty) {
+      toast.error('يرجى تحديد تخصص ألعاب القوى');
+      return;
+    }
+
+    // 1. General Limit Checked
+    const activeSportConfig = sportsConfig.find(s => s.id === selectedSportId);
+    if (activeSportConfig?.studentLimit && activeSportConfig.studentLimit > 0) {
+      const activeCount = editingStudentId 
+        ? activeSportStudents.filter(s => s.id !== editingStudentId).length
+        : activeSportStudents.length;
+      if (activeCount >= activeSportConfig.studentLimit) {
+        toast.error(`خطأ في التسجيل: تم بلوغ السقف الأقصى المسموح به للتسجيل في هذا التخصص وهو ${activeSportConfig.studentLimit} تلاميذ.`);
+        return;
+      }
+    }
+
+    // 2. Cross Country Specific Limit Checked
+    if (selectedSportId === 'cross_country') {
+      const sameGroupStudents = activeSportStudents.filter(
+        s => s.id !== editingStudentId && s.category === category && s.gender === gender && s.participationType === participationType
+      );
+      const limitVal = participationType === 'individual' ? 3 : 5;
+      if (sameGroupStudents.length >= limitVal) {
+        const typeLabel = participationType === 'individual' ? 'مشاركة فردية' : 'مشاركة فريق المؤسسة';
+        toast.error(`خطأ في التسجيل: لقد بلغت السقف الأقصى للتسجيل لهذه الفئة والجنس لـ (${typeLabel}) وهو ${limitVal} تلاميذ.`);
+        return;
+      }
     }
 
     if (birthDate && category) {
@@ -209,43 +330,79 @@ export const TeacherTeams: React.FC = () => {
     }
 
     try {
-      const studentData: Omit<Student, 'id' | 'createdAt' | 'updatedAt'> = {
-        fullName: fullName.trim(),
-        gender,
-        birthDate,
-        category,
-        schoolId: userProfile?.id || 'unknown_school',
-        schoolName: schoolName,
-        sportId: selectedSportId,
-        photoUrl: photo || undefined
-      };
+      if (editingStudentId) {
+        const studentData: Partial<Student> = {
+          fullName: fullName.trim(),
+          gender,
+          birthDate,
+          category,
+          photoUrl: photo || undefined,
+          ...(selectedSportId === 'cross_country' ? {
+            participationType,
+            distance: getCrossCountryDistance(category, gender)
+          } : {}),
+          ...(selectedSportId === 'athletics' ? {
+            athleticsSpecialty: athleticsSpecialty || undefined
+          } : {})
+        };
 
-      const newStudent = await DataService.addStudent(studentData);
-      setStudents(prev => [newStudent, ...prev]);
+        await DataService.updateStudent(editingStudentId, studentData);
+        setStudents(prev => prev.map(s => s.id === editingStudentId ? { ...s, ...studentData } : s));
+        
+        toast.success('تم تعديل بيانات التلميذ بنجاح!');
+      } else {
+        const studentData: Omit<Student, 'id' | 'createdAt' | 'updatedAt'> = {
+          fullName: fullName.trim(),
+          gender,
+          birthDate,
+          category,
+          schoolId: userProfile?.id || 'unknown_school',
+          schoolName: schoolName,
+          sportId: selectedSportId,
+          photoUrl: photo || undefined,
+          ...(selectedSportId === 'cross_country' ? {
+            participationType,
+            distance: getCrossCountryDistance(category, gender)
+          } : {}),
+          ...(selectedSportId === 'athletics' ? {
+            athleticsSpecialty: athleticsSpecialty || undefined
+          } : {})
+        };
+
+        const newStudent = await DataService.addStudent(studentData);
+        setStudents(prev => [newStudent, ...prev]);
+        
+        toast.success('تم تسجيل وإضافة التلميذ إلى الفريق بنجاح!');
+      }
       
       // Reset Form
       setFullName('');
       setBirthDate('');
       setPhoto('');
+      setAthleticsSpecialty('');
+      setEditingStudentId(null);
       setIsFormOpen(false);
-      
-      toast.success('تم تسجيل وإضافة التلميذ إلى الفريق بنجاح!');
     } catch (error) {
-      console.error('Error adding student:', error);
-      toast.error('تعذر تسجيل التلميذ حالياً');
+      console.error('Error saving student:', error);
+      toast.error('تعذر حفظ بيانات التلميذ حالياً');
     }
   };
 
-  const handleDeleteStudent = async (studentId: string) => {
-    if (!window.confirm('هل أنت متأكد من رغبتك في حذف هذا التلميذ من الفريق؟')) return;
+  const handleDeleteStudent = (studentId: string) => {
+    setStudentToDeleteId(studentId);
+  };
 
+  const executeDeleteStudent = async () => {
+    if (!studentToDeleteId) return;
     try {
-      await DataService.deleteStudent(studentId);
-      setStudents(prev => prev.filter(s => s.id !== studentId));
+      await DataService.deleteStudent(studentToDeleteId);
+      setStudents(prev => prev.filter(s => s.id !== studentToDeleteId));
       toast.success('تم حذف التلميذ من اللائحة بنجاح');
     } catch (error) {
       console.error('Error deleting student:', error);
       toast.error('تعذر حذف التلميذ');
+    } finally {
+      setStudentToDeleteId(null);
     }
   };
 
@@ -265,6 +422,32 @@ export const TeacherTeams: React.FC = () => {
   // Active Sport Configuration
   const activeSportConfig = sportsConfig.find(s => s.id === selectedSportId);
   const activeSportCategories = activeSportConfig?.ageCategories || [];
+
+  // Real-time limit checking for rendering warning indicators
+  const isGeneralLimitReached = (() => {
+    if (activeSportConfig?.studentLimit && activeSportConfig.studentLimit > 0) {
+      const activeCount = editingStudentId 
+        ? activeSportStudents.filter(s => s.id !== editingStudentId).length
+        : activeSportStudents.length;
+      return activeCount >= activeSportConfig.studentLimit;
+    }
+    return false;
+  })();
+
+  const crossCountryLimitDetails = (() => {
+    if (selectedSportId === 'cross_country') {
+      const sameGroupStudents = activeSportStudents.filter(
+        s => s.id !== editingStudentId && s.category === category && s.gender === gender && s.participationType === participationType
+      );
+      const limitVal = participationType === 'individual' ? 3 : 5;
+      return {
+        count: sameGroupStudents.length,
+        limitVal,
+        isReached: sameGroupStudents.length >= limitVal
+      };
+    }
+    return null;
+  })();
 
   if (loading) {
     return (
@@ -398,7 +581,7 @@ export const TeacherTeams: React.FC = () => {
                 إجمالي التلاميذ: {activeSportStudents.length}
               </span>
               <button
-                onClick={() => setIsFormOpen(true)}
+                onClick={handleOpenNewStudentForm}
                 disabled={!activeSportCategories || activeSportCategories.length === 0}
                 className="bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs px-4 py-2 rounded-xl shadow-xs flex items-center gap-1.5 transition-colors disabled:opacity-50"
               >
@@ -427,7 +610,7 @@ export const TeacherTeams: React.FC = () => {
               <div className="flex items-center justify-between border-b border-slate-100 pb-3 mb-4">
                 <h4 className="text-xs md:text-sm font-bold text-slate-800 flex items-center gap-2">
                   <UserPlus className="h-4 w-4 text-blue-600" />
-                  <span>تسجيل تلميذ جديد في الفريق</span>
+                  <span>{editingStudentId ? 'تعديل بيانات التلميذ' : 'تسجيل تلميذ جديد في الفريق'}</span>
                 </h4>
                 <button
                   onClick={() => setIsFormOpen(false)}
@@ -438,6 +621,31 @@ export const TeacherTeams: React.FC = () => {
               </div>
 
               <form onSubmit={handleAddStudent} className="space-y-4">
+                {/* Dynamic limit warning alert */}
+                {isGeneralLimitReached && (
+                  <div className="p-4 bg-red-50 border border-red-200 text-red-950 rounded-xl flex gap-3 text-xs leading-relaxed animate-pulse">
+                    <AlertCircle className="h-5 w-5 shrink-0 text-red-600" />
+                    <div>
+                      <p className="font-bold">تنبيه بالوصول للحد الأقصى للتسجيل!</p>
+                      <p className="mt-0.5 opacity-90 font-medium">
+                        لقد تم بلوغ الحد الأقصى المسموح به للتسجيل في هذا التخصص وهو <span className="font-bold underline">{activeSportConfig?.studentLimit}</span> تلاميذ. لا يمكن تسجيل تلاميذ إضافيين حتى تقوم بحذف أو تعديل أحد المشاركين الحاليين.
+                      </p>
+                    </div>
+                  </div>
+                )}
+
+                {selectedSportId === 'cross_country' && crossCountryLimitDetails?.isReached && (
+                  <div className="p-4 bg-amber-50 border border-amber-200 text-amber-950 rounded-xl flex gap-3 text-xs leading-relaxed animate-pulse">
+                    <AlertCircle className="h-5 w-5 shrink-0 text-amber-600" />
+                    <div>
+                      <p className="font-bold">تنبيه بالوصول للحد الأقصى للفئة المحددة!</p>
+                      <p className="mt-0.5 opacity-90 font-medium">
+                        لقد تم بلوغ الحد الأقصى للتسجيل لهذه الفئة والجنس ونوع المشاركة وهو <span className="font-bold underline">{crossCountryLimitDetails.limitVal}</span> تلاميذ. لا يمكن إضافة تلميذ آخر في هذه الفئة ({getCategoryLabel(category)} - {gender === 'Male' ? 'ذكر' : 'أنثى'} - {participationType === 'individual' ? 'مشاركة فردية' : 'مشاركة فريق'}) حتى يتم تعديل أو حذف مشارك حالي.
+                      </p>
+                    </div>
+                  </div>
+                )}
+
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   {/* Name and Surname */}
                   <div>
@@ -489,16 +697,27 @@ export const TeacherTeams: React.FC = () => {
 
                   {/* Date of Birth */}
                   <div>
-                    <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                      تاريخ الازدياد *
-                    </label>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <label className="block text-xs font-bold text-slate-700">
+                        تاريخ الازدياد *
+                      </label>
+                      <span className="text-[10px] text-blue-600 font-bold bg-blue-50 px-2 py-0.5 rounded border border-blue-200">
+                        إحالة تلقائية للفئة
+                      </span>
+                    </div>
                     <input
                       type="date"
                       required
                       className="w-full text-xs px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all font-mono"
                       value={birthDate}
-                      onChange={(e) => setBirthDate(e.target.value)}
+                      onChange={(e) => handleBirthDateChange(e.target.value)}
                     />
+                    {birthDate && category && (
+                      <div className="mt-1.5 flex items-center gap-1.5 text-[11px] font-bold text-emerald-800 bg-emerald-50/90 px-2.5 py-1 rounded-lg border border-emerald-200">
+                        <span className="text-emerald-600 text-xs">✓</span>
+                        <span>تمت إحالة التلميذ(ة) تلقائياً لفئة: <strong className="underline">{getCategoryLabel(category)}</strong></span>
+                      </div>
+                    )}
                   </div>
 
                   {/* Category Selection */}
@@ -519,6 +738,76 @@ export const TeacherTeams: React.FC = () => {
                       ))}
                     </select>
                   </div>
+
+                  {/* Athletics Specialty Selection */}
+                  {selectedSportId === 'athletics' && (
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                        تخصص ألعاب القوى المعني *
+                      </label>
+                      <select
+                        required
+                        className="w-full text-xs px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all font-semibold text-slate-700"
+                        value={athleticsSpecialty}
+                        onChange={(e) => setAthleticsSpecialty(e.target.value)}
+                      >
+                        <option value="">-- اختر التخصص --</option>
+                        {(activeSportConfig?.athleticsSpecialties || ['القفز الطولي العلوي', 'القفز الطولي', 'جري 80 متر']).map((spec) => (
+                          <option key={spec} value={spec}>
+                            {spec}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+
+                  {selectedSportId === 'cross_country' && (
+                    <>
+                      {/* Participation Type (Cross Country) */}
+                      <div>
+                        <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                          نوع المشاركة في العدو الريفي *
+                        </label>
+                        <div className="grid grid-cols-2 gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setParticipationType('individual')}
+                            className={`py-2 px-3 text-xs font-bold rounded-xl border transition-all flex items-center justify-center gap-2 cursor-pointer ${
+                              participationType === 'individual'
+                                ? 'bg-amber-50 border-amber-500 text-amber-700 shadow-3xs'
+                                : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-white'
+                            }`}
+                          >
+                            <span>🏃</span>
+                            <span>مشاركة فردية (الحد: 3)</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setParticipationType('school_team')}
+                            className={`py-2 px-3 text-xs font-bold rounded-xl border transition-all flex items-center justify-center gap-2 cursor-pointer ${
+                              participationType === 'school_team'
+                                ? 'bg-emerald-50 border-emerald-500 text-emerald-700 shadow-3xs'
+                                : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-white'
+                            }`}
+                          >
+                            <span>👥</span>
+                            <span>فريق المؤسسة (الحد: 5)</span>
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Calculated Distance display */}
+                      <div>
+                        <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                          المسافة المحددة بالفئة والجنس
+                        </label>
+                        <div className="w-full text-xs px-3 py-3 bg-blue-50 border border-blue-200 rounded-xl text-blue-800 font-extrabold flex items-center gap-2">
+                          <span>📈</span>
+                          <span>المسافة المقررة للتلميذ(ة): {getCrossCountryDistance(category, gender)}</span>
+                        </div>
+                      </div>
+                    </>
+                  )}
 
                   {/* Photo Upload */}
                   <div className="md:col-span-2">
@@ -591,7 +880,7 @@ export const TeacherTeams: React.FC = () => {
                     className="bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs px-5 py-2.5 rounded-xl shadow-xs transition-all flex items-center gap-1.5"
                   >
                     <UserPlus className="h-4 w-4" />
-                    <span>{uploading ? 'جاري رفع الملف...' : 'حفظ وتسجيل التلميذ'}</span>
+                    <span>{uploading ? 'جاري رفع الملف...' : (editingStudentId ? 'تعديل وحفظ بيانات التلميذ' : 'حفظ وتسجيل التلميذ')}</span>
                   </button>
                 </div>
               </form>
@@ -616,6 +905,15 @@ export const TeacherTeams: React.FC = () => {
                       <th className="p-4">الجنس</th>
                       <th className="p-4">تاريخ الازدياد</th>
                       <th className="p-4">الفئة</th>
+                      {selectedSportId === 'cross_country' && (
+                        <>
+                          <th className="p-4">نوع المشاركة</th>
+                          <th className="p-4">المسافة</th>
+                        </>
+                      )}
+                      {selectedSportId === 'athletics' && (
+                        <th className="p-4">التخصص</th>
+                      )}
                       <th className="p-4">المؤسسة</th>
                       <th className="p-4 text-left">الإجراءات</th>
                     </tr>
@@ -654,17 +952,49 @@ export const TeacherTeams: React.FC = () => {
                             {getCategoryLabel(stud.category)}
                           </span>
                         </td>
+                        {selectedSportId === 'cross_country' && (
+                          <>
+                            <td className="p-4 whitespace-nowrap">
+                              <span className={`inline-flex px-2.5 py-0.5 rounded text-[10px] font-bold border ${
+                                stud.participationType === 'school_team'
+                                  ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                  : 'bg-amber-50 text-amber-700 border-amber-200'
+                              }`}>
+                                {stud.participationType === 'school_team' ? 'فريق المؤسسة' : 'فردي'}
+                              </span>
+                            </td>
+                            <td className="p-4 whitespace-nowrap font-bold text-blue-600">
+                              {stud.distance || getCrossCountryDistance(stud.category, stud.gender)}
+                            </td>
+                          </>
+                        )}
+                        {selectedSportId === 'athletics' && (
+                          <td className="p-4 whitespace-nowrap font-bold text-blue-600">
+                            {stud.athleticsSpecialty || 'غير محدد'}
+                          </td>
+                        )}
                         <td className="p-4 whitespace-nowrap text-slate-500 font-bold">
                           {stud.schoolName}
                         </td>
                         <td className="p-4 whitespace-nowrap text-left">
-                          <button
-                            onClick={() => handleDeleteStudent(stud.id)}
-                            title="حذف التلميذ"
-                            className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors cursor-pointer"
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </button>
+                          <div className="flex items-center justify-end gap-1.5">
+                            <button
+                              onClick={() => handleEditStudent(stud)}
+                              title="تعديل بيانات التلميذ"
+                              className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors cursor-pointer inline-flex items-center"
+                            >
+                              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                              </svg>
+                            </button>
+                            <button
+                              onClick={() => handleDeleteStudent(stud.id)}
+                              title="حذف التلميذ"
+                              className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors cursor-pointer inline-flex items-center"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     ))}
@@ -684,6 +1014,41 @@ export const TeacherTeams: React.FC = () => {
                 </div>
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Custom Confirmation Modal for Deletion */}
+      {studentToDeleteId && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs" dir="rtl">
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-xl max-w-sm w-full overflow-hidden animate-in fade-in zoom-in-95 duration-150 p-5 space-y-4">
+            <div className="flex items-center gap-3 text-red-600">
+              <div className="w-10 h-10 rounded-full bg-red-50 flex items-center justify-center text-xl">
+                ⚠️
+              </div>
+              <h3 className="text-sm font-bold">تأكيد حذف المشارك</h3>
+            </div>
+            
+            <p className="text-xs text-slate-600 leading-relaxed">
+              هل أنت متأكد من رغبتك في حذف هذا التلميذ من الفريق بشكل نهائي؟ لا يمكن التراجع عن هذا الإجراء لاحقاً.
+            </p>
+
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => setStudentToDeleteId(null)}
+                className="px-3 py-1.5 rounded-lg text-xs font-bold border border-slate-200 text-slate-600 hover:bg-slate-50 cursor-pointer"
+              >
+                إلغاء
+              </button>
+              <button
+                type="button"
+                onClick={executeDeleteStudent}
+                className="px-3 py-1.5 rounded-lg text-xs font-bold bg-red-600 text-white hover:bg-red-700 cursor-pointer shadow-3xs"
+              >
+                نعم، احذف التلميذ
+              </button>
+            </div>
           </div>
         </div>
       )}

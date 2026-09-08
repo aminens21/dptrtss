@@ -15,6 +15,7 @@ import { Referees } from './pages/Referees';
 import { SportsConfig } from './pages/SportsConfig';
 import { TeacherTeams } from './pages/TeacherTeams';
 import { TechCommitteeHeads } from './pages/TechCommitteeHeads';
+import { Statistics } from './pages/Statistics';
 
 import { Toaster } from 'react-hot-toast';
 
@@ -44,6 +45,7 @@ export default function App() {
               <Route path="sports-config" element={<SportsConfig />} />
               <Route path="teacher-teams" element={<TeacherTeams />} />
               <Route path="tech-committee" element={<TechCommitteeHeads />} />
+              <Route path="statistics" element={<Statistics />} />
             </Route>
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>

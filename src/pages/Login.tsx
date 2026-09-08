@@ -19,7 +19,11 @@ import {
   MapPin,
   CreditCard,
   Award,
-  Phone
+  Phone,
+  Camera,
+  UploadCloud,
+  Trash2,
+  Image as ImageIcon
 } from 'lucide-react';
 import {
   signInWithEmailAndPassword,
@@ -31,6 +35,7 @@ import { doc, setDoc, getDoc, serverTimestamp } from 'firebase/firestore';
 import { auth, db } from '../firebase/config';
 import { Role } from '../types';
 import { DataService, SPORTS_MAP } from '../lib/dataService';
+import { AppLogo } from '../components/AppLogo';
 import toast from 'react-hot-toast';
 
 export const Login: React.FC = () => {
@@ -49,6 +54,51 @@ export const Login: React.FC = () => {
   const [regLeaseNumber, setRegLeaseNumber] = useState('');
   const [regRefereeSpecialty, setRegRefereeSpecialty] = useState<string[]>([]);
   const [regPhone, setRegPhone] = useState('');
+  const [regPhoto, setRegPhoto] = useState<string>('');
+  const [isDraggingPhoto, setIsDraggingPhoto] = useState(false);
+
+  const handleProcessPhotoFile = (file: File) => {
+    if (!file.type.startsWith('image/')) {
+      toast.error('يرجى اختيار ملف صورة صالح (JPG, PNG, WebP)');
+      return;
+    }
+    if (file.size > 8 * 1024 * 1024) {
+      toast.error('حجم الصورة كبير جداً، يرجى اختيار صورة أقل من 8 ميغابايت');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const img = new window.Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        const maxDim = 320;
+        let width = img.width;
+        let height = img.height;
+        if (width > height) {
+          if (width > maxDim) {
+            height = Math.round((height * maxDim) / width);
+            width = maxDim;
+          }
+        } else {
+          if (height > maxDim) {
+            width = Math.round((width * maxDim) / height);
+            height = maxDim;
+          }
+        }
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.drawImage(img, 0, 0, width, height);
+          const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+          setRegPhoto(dataUrl);
+          toast.success('تم إرفاق صورة الأستاذ بنجاح');
+        }
+      };
+      img.src = event.target?.result as string;
+    };
+    reader.readAsDataURL(file);
+  };
 
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -223,6 +273,7 @@ export const Login: React.FC = () => {
       leaseNumber: regLeaseNumber.trim(),
       refereeSpecialty: regRefereeSpecialty,
       phone: regPhone.trim(),
+      photoUrl: regPhoto || '',
       isActive: true
     };
 
@@ -231,7 +282,7 @@ export const Login: React.FC = () => {
       try {
         const userCredential = await createUserWithEmailAndPassword(auth, cleanEmail, regPassword);
         const user = userCredential.user;
-        await updateProfile(user, { displayName: regFullName.trim() });
+        await updateProfile(user, { displayName: regFullName.trim(), photoURL: regPhoto || null });
 
         await setDoc(doc(db, 'users', user.uid), {
           id: user.uid,
@@ -281,7 +332,7 @@ export const Login: React.FC = () => {
       }
 
       // 3. Login Teacher immediately into Auth Context
-      loginAsDemo('TEACHER', regFullName.trim(), cleanEmail);
+      loginAsDemo('TEACHER', regFullName.trim(), cleanEmail, undefined, undefined, { ...teacherData, photoUrl: regPhoto });
 
       toast.success(`مرحباً بك أستاذ ${regFullName.trim()}! تم إنشاء وتأكيد حسابك بنجاح.`);
     } catch (err: any) {
@@ -323,14 +374,12 @@ export const Login: React.FC = () => {
         {/* Main Card */}
         <div className="rounded-2xl bg-white p-6 md:p-8 border border-slate-200 shadow-sm space-y-5">
           {/* Brand Header */}
-          <div className="text-center">
-            <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-xl bg-[#0f172a] text-white shadow-xs">
-              <span className="text-xl font-black text-blue-400">ط</span>
-            </div>
-            <h2 className="mt-3 text-lg font-bold tracking-tight text-slate-800">
-              منظومة الرياضة المدرسية
+          <div className="text-center flex flex-col items-center">
+            <AppLogo size={70} className="mx-auto mb-1" />
+            <h2 className="mt-2 text-lg font-black tracking-tight text-slate-900">
+              الجامعة الملكية المغربية للرياضة المدرسية
             </h2>
-            <p className="mt-0.5 text-xs text-slate-500 font-medium">
+            <p className="mt-0.5 text-xs text-blue-700 font-bold">
               المديرية الإقليمية لوزارة التربية الوطنية والتعليم الأولي والرياضة – تاوريرت
             </p>
           </div>
@@ -444,6 +493,82 @@ export const Login: React.FC = () => {
                 <span>
                   قم بملء الاستمارة التالية ببريدك الإلكتروني وبياناتك الشخصية ليتم فتح وتأكيد حسابك كأستاذ وحفظ بياناتك في قاعدة بيانات المديرية.
                 </span>
+              </div>
+
+              {/* Teacher Photo Upload (Drag & Drop + Click Selection) */}
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1 flex items-center gap-1">
+                  <Camera className="h-3.5 w-3.5 text-blue-600" />
+                  <span>صورة الأستاذ الشخصية (اختيارية)</span>
+                </label>
+
+                {regPhoto ? (
+                  <div className="flex items-center gap-3 p-2.5 bg-slate-50 border border-slate-200 rounded-xl">
+                    <div className="relative w-12 h-12 rounded-full overflow-hidden border-2 border-blue-500 shadow-xs shrink-0 bg-white">
+                      <img src={regPhoto} alt="صورة الأستاذ" className="w-full h-full object-cover" />
+                    </div>
+                    <div className="flex-1 min-w-0 text-right">
+                      <p className="text-xs font-bold text-slate-800">تم اختيار الصورة بنجاح</p>
+                      <p className="text-[10px] text-slate-400">ستظهر صورتك في ملفك الشخصي وبطاقة التعريف</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setRegPhoto('')}
+                      className="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors cursor-pointer"
+                      title="حذف الصورة"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  </div>
+                ) : (
+                  <div
+                    onDragOver={(e) => {
+                      e.preventDefault();
+                      setIsDraggingPhoto(true);
+                    }}
+                    onDragLeave={(e) => {
+                      e.preventDefault();
+                      setIsDraggingPhoto(false);
+                    }}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      setIsDraggingPhoto(false);
+                      const files = e.dataTransfer.files;
+                      if (files && files.length > 0) {
+                        handleProcessPhotoFile(files[0]);
+                      }
+                    }}
+                    onClick={() => {
+                      const input = document.getElementById('reg-teacher-photo-input') as HTMLInputElement;
+                      input?.click();
+                    }}
+                    className={`border-2 border-dashed rounded-xl p-3 text-center cursor-pointer transition-all flex flex-col items-center justify-center gap-1 ${
+                      isDraggingPhoto
+                        ? 'border-blue-500 bg-blue-50/70 scale-[0.99]'
+                        : 'border-slate-300 hover:border-blue-400 bg-slate-50/50 hover:bg-slate-50'
+                    }`}
+                  >
+                    <input
+                      type="file"
+                      id="reg-teacher-photo-input"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={(e) => {
+                        const files = e.target.files;
+                        if (files && files.length > 0) {
+                          handleProcessPhotoFile(files[0]);
+                        }
+                      }}
+                    />
+                    <div className="w-7 h-7 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center">
+                      <UploadCloud className="h-3.5 w-3.5" />
+                    </div>
+                    <div>
+                      <p className="text-xs font-bold text-slate-700">اسحب وأفلت صورة الأستاذ هنا أو انقر للاختيار</p>
+                      <p className="text-[10px] text-slate-400">صيغ الصور: PNG, JPG, WebP</p>
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Full Name */}

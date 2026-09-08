@@ -26,16 +26,16 @@ const NotificationContext = createContext<NotificationContextType>({
 
 export const useNotifications = () => useContext(NotificationContext);
 
-// Generates a beautiful premium synthetic notification chime
+// Generates a pleasant synthetic chime
 const playNotificationSound = () => {
   try {
     const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
     const osc = ctx.createOscillator();
     const gain = ctx.createGain();
     osc.type = 'sine';
-    osc.frequency.setValueAtTime(587.33, ctx.currentTime); // D5 (pleasant high note)
-    osc.frequency.setValueAtTime(880, ctx.currentTime + 0.1);  // A5 (harmonious third)
-    gain.gain.setValueAtTime(0.1, ctx.currentTime);
+    osc.frequency.setValueAtTime(587.33, ctx.currentTime); // D5
+    osc.frequency.setValueAtTime(880, ctx.currentTime + 0.1);  // A5
+    gain.gain.setValueAtTime(0.12, ctx.currentTime);
     gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.4);
     osc.connect(gain);
     gain.connect(ctx.destination);
@@ -46,17 +46,54 @@ const playNotificationSound = () => {
   }
 };
 
+// Dispatches a system/mobile push notification via ServiceWorker or standard Notification API
+const showSystemNotification = async (title: string, body: string, sportId?: string) => {
+  if (typeof window === 'undefined' || !('Notification' in window) || Notification.permission !== 'granted') {
+    return;
+  }
+
+  const options: NotificationOptions & Record<string, any> = {
+    body,
+    icon: '/pwa-192x192.png',
+    badge: '/pwa-192x192.png',
+    tag: `taourirt-sports-${Date.now()}`,
+    renotify: true,
+    data: {
+      url: '/matches',
+      sportId: sportId || 'all',
+      date: new Date().toISOString()
+    }
+  };
+
+  try {
+    // 1. Prefer Service Worker registration showNotification (Required for Mobile Android/PWA)
+    if ('serviceWorker' in navigator) {
+      const reg = await navigator.serviceWorker.ready;
+      if (reg && typeof reg.showNotification === 'function') {
+        await reg.showNotification(title, options);
+        return;
+      }
+    }
+    // 2. Fallback to standard window Notification
+    new Notification(title, options);
+  } catch (err) {
+    console.warn("System notification display fallback:", err);
+    try {
+      new Notification(title, options);
+    } catch {}
+  }
+};
+
 export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { userProfile } = useAuth();
   const [allRawNotifications, setAllRawNotifications] = useState<AppNotification[]>([]);
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [permission, setPermission] = useState<NotificationPermission>(
-    typeof window !== 'undefined' ? Notification.permission : 'default'
+    typeof window !== 'undefined' && 'Notification' in window ? Notification.permission : 'default'
   );
   
   const isFirstLoad = useRef(true);
-  const sessionStartTime = useRef(Date.now());
 
   // Request browser Notification permissions
   const requestPermission = async (): Promise<boolean> => {
@@ -70,12 +107,11 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
       setPermission(res);
       if (res === 'granted') {
         toast.success('تم تفعيل إشعارات الهاتف والويب بنجاح! 🔔');
-        // Play welcome chime
         playNotificationSound();
-        new Notification('مديرية تاوريرت للرياضة المدرسية', {
-          body: 'تم تفعيل الإشعارات بنجاح. ستتلقى تحديثات مباريات تخصصك هنا.',
-          icon: '/favicon.ico',
-        });
+        await showSystemNotification(
+          'الرياضة المدرسية – مديرية تاوريرت 🏆',
+          'تم تفعيل إشعارات الهاتف بنجاح! ستتلقى تنبيهات المباريات والنتائج فوراً هنا.'
+        );
         return true;
       } else {
         toast.error('تم رفض صلاحية الإشعارات.');
@@ -109,7 +145,6 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
         const fetched: AppNotification[] = [];
         snapshot.forEach((doc) => {
           const data = doc.data();
-          // Map Firebase timestamp to ISO or Date string
           let createdAtStr = new Date().toISOString();
           if (data.createdAt) {
             if (typeof data.createdAt.toDate === 'function') {
@@ -136,7 +171,6 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
       },
       (error) => {
         console.warn('Real-time notifications Firestore error, loading fallback local storage:', error);
-        // Fallback to local storage
         DataService.getNotifications().then((localData) => {
           setAllRawNotifications(localData);
         });
@@ -160,56 +194,53 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
     const techSports = userProfile.techCommitteeSports || [];
     const techSportsMemberOf = userProfile.techCommitteeSportsMemberOf || [];
 
-    // Filter logic based on the user's profile
+    // Filter logic based on user's role and assigned sports
     const filtered = allRawNotifications.filter((notif) => {
-      // Admins see everything
+      // Central Admins see all announcements and sports notifications
       if (userRole === 'CENTRAL_ADMIN') return true;
 
-      // Specifically targeted notifications
+      // Specifically targeted notifications to this user
       if (Array.isArray(notif.userIds) && notif.userIds.includes(userId)) return true;
 
       // Filter by Role
       if (notif.role && notif.role !== 'ALL' && notif.role !== userRole) {
-        // Special exceptions (e.g. if targeted to REFEREE, and user is referee or teacher with specialty)
         if (notif.role === 'REFEREE' && userRole === 'TEACHER' && specialties.length > 0) {
-          // allow
+          // allow teacher-referees
         } else {
           return false;
         }
       }
 
       // Filter by Sport Specialty (التخصص الرياضي)
-      if (notif.sportId) {
+      if (notif.sportId && notif.sportId !== 'ALL') {
         // Referee: check if sport is in referee specialties
         if (userRole === 'REFEREE') {
           return specialties.includes(notif.sportId);
         }
 
-        // Teacher / Coach:
-        if (userRole === 'TEACHER') {
-          // If they are Tech Committee Head of that sport
-          if (userProfile.isTechCommitteeHead && techSports.includes(notif.sportId)) {
-            return true;
-          }
-          // If they are Tech Committee Member of that sport
-          if (userProfile.isTechCommitteeMember && techSportsMemberOf.includes(notif.sportId)) {
-            return true;
-          }
-          // Otherwise, teachers can see general announcements & updates for their selected sport,
-          // or if they registered teams in that sport
-          return true; // Or we can restrict to true to keep it open
-        }
-
-        // Sport Manager: check if sportId matches
+        // Sport Manager: check if sport matches
         if (userRole === 'SPORT_MANAGER') {
           return userProfile.sportId === notif.sportId;
+        }
+
+        // Teacher / Tech Committee
+        if (userRole === 'TEACHER') {
+          if (userProfile.isTechCommitteeHead) {
+            // Head only receives updates for their assigned sports or general
+            return techSports.includes(notif.sportId) || (userProfile.sportId === notif.sportId);
+          }
+          if (userProfile.isTechCommitteeMember) {
+            return techSportsMemberOf.includes(notif.sportId);
+          }
+          // Regular teacher: can view notifications
+          return true;
         }
       }
 
       return true;
     });
 
-    // Check if a brand-new notification arrived for browser push
+    // Check if a brand-new notification arrived for browser/mobile push
     if (!isFirstLoad.current && filtered.length > 0) {
       const prevIds = notifications.map((n) => n.id);
       const newlyArrived = filtered.filter((n) => !prevIds.includes(n.id));
@@ -218,28 +249,21 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
         const absoluteNewest = newlyArrived[0];
         const timeDiffMs = Date.now() - new Date(absoluteNewest.createdAt).getTime();
 
-        // Ensure we only notify for events occurring right now (within 30 seconds),
-        // preventing mass notification bursts on page loading or stream reconnects
-        if (timeDiffMs < 30000) {
+        if (timeDiffMs < 45000) {
           playNotificationSound();
           toast(absoluteNewest.title, {
             icon: '🔔',
-            duration: 5000,
+            duration: 6000,
           });
 
-          if (Notification.permission === 'granted') {
-            new Notification(absoluteNewest.title, {
-              body: absoluteNewest.body,
-              icon: '/favicon.ico',
-            });
-          }
+          showSystemNotification(absoluteNewest.title, absoluteNewest.body, absoluteNewest.sportId);
         }
       }
     }
 
     setNotifications(filtered);
     
-    // Count unread (not included in readBy array)
+    // Count unread
     const unread = filtered.filter((n) => !n.readBy?.includes(userId)).length;
     setUnreadCount(unread);
 
@@ -252,7 +276,6 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
     if (!userProfile) return;
     await DataService.markNotificationAsRead(id, userProfile.id);
     
-    // Update local state instantly
     setNotifications((prev) =>
       prev.map((n) => {
         if (n.id === id) {
@@ -270,10 +293,8 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
     if (!userProfile) return;
     const unreadNotifs = notifications.filter((n) => !n.readBy?.includes(userProfile.id));
     
-    // Perform sequentially or concurrently
     await Promise.all(unreadNotifs.map((n) => DataService.markNotificationAsRead(n.id, userProfile.id)));
 
-    // Update local state instantly
     setNotifications((prev) =>
       prev.map((n) => {
         const currentReadBy = n.readBy || [];

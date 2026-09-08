@@ -29,11 +29,18 @@ export const CreateMatchModal: React.FC<CreateMatchModalProps> = ({
 }) => {
   // Filter tournaments if manager has a restricted sport
   const availableTournaments = useMemo(() => {
+    let list = tournaments;
     if (managerSportId) {
       const matching = tournaments.filter(t => t.sportId === managerSportId);
-      return matching.length > 0 ? matching : tournaments;
+      list = matching.length > 0 ? matching : tournaments;
     }
-    return tournaments;
+    const seen = new Set<string>();
+    return list.filter(t => {
+      if (!t || !t.id) return false;
+      if (seen.has(t.id)) return false;
+      seen.add(t.id);
+      return true;
+    });
   }, [tournaments, managerSportId]);
 
   const [tournamentId, setTournamentId] = useState(availableTournaments[0]?.id || 'tourn-1');

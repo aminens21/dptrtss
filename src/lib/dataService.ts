@@ -10,38 +10,91 @@ const STORAGE_KEYS = {
   VENUES: 'taourirt_venues_data',
 };
 
-// Local storage helpers
-function getLocal<T>(key: string, fallback: T[]): T[] {
+// Helper to deduplicate any array of objects by id
+export function deduplicateById<T extends { id?: string }>(items: T[]): T[] {
+  if (!Array.isArray(items)) return [];
+  const seen = new Set<string>();
+  const result: T[] = [];
+  for (const item of items) {
+    if (!item) continue;
+    const id = item.id;
+    if (id) {
+      if (!seen.has(id)) {
+        seen.add(id);
+        result.push(item);
+      }
+    } else {
+      result.push(item);
+    }
+  }
+  return result;
+}
+
+// Local storage helpers with automatic deduplication and self-healing
+function getLocal<T extends { id?: string }>(key: string, fallback: T[]): T[] {
   try {
     const data = localStorage.getItem(key);
     if (!data) {
-      localStorage.setItem(key, JSON.stringify(fallback));
-      return fallback;
+      const cleanFallback = deduplicateById(fallback);
+      localStorage.setItem(key, JSON.stringify(cleanFallback));
+      return cleanFallback;
     }
-    return JSON.parse(data);
-  } catch {
+    const parsed = JSON.parse(data);
+    if (Array.isArray(parsed)) {
+      const clean = deduplicateById<T>(parsed);
+      // Auto-heal local storage if duplicates existed
+      if (clean.length !== parsed.length) {
+        localStorage.setItem(key, JSON.stringify(clean));
+      }
+      return clean;
+    }
     return fallback;
+  } catch {
+    return deduplicateById(fallback);
   }
 }
 
-function setLocal<T>(key: string, data: T[]) {
+function setLocal<T extends { id?: string }>(key: string, data: T[]) {
   try {
-    localStorage.setItem(key, JSON.stringify(data));
+    const clean = deduplicateById(data);
+    localStorage.setItem(key, JSON.stringify(clean));
   } catch (e) {
     console.error("Local storage error:", e);
   }
 }
 
-export const SPORTS_MAP: Record<string, { name: string; icon: string }> = {
+export const BASE_SPORTS: Record<string, { name: string; icon: string }> = {
   football: { name: 'كرة القدم', icon: '⚽' },
   futsal: { name: 'فوتسال (داخل القاعة)', icon: '⚽' },
   basketball: { name: 'كرة السلة', icon: '🏀' },
   handball: { name: 'كرة اليد', icon: '🤾' },
   volleyball: { name: 'الكرة الطائرة', icon: '🏐' },
   athletics: { name: 'ألعاب القوى', icon: '🏃' },
+  cross_country: { name: 'العدو الريفي المدرسي', icon: '🏃‍♂️' },
   table_tennis: { name: 'كرة الطاولة', icon: '🏓' },
   chess: { name: 'الشطرنج المدرسي', icon: '♟️' }
 };
+
+export const SPORTS_MAP: Record<string, { name: string; icon: string }> = {
+  ...BASE_SPORTS
+};
+
+// Immediately hydrate SPORTS_MAP from cached custom sports so synchronous accesses are complete
+try {
+  const cachedCustomSports = localStorage.getItem('taourirt_custom_sports');
+  if (cachedCustomSports) {
+    const parsed = JSON.parse(cachedCustomSports);
+    if (Array.isArray(parsed)) {
+      parsed.forEach((s: any) => {
+        if (s && s.id && s.name) {
+          SPORTS_MAP[s.id] = { name: s.name, icon: s.icon || '🏆' };
+        }
+      });
+    }
+  }
+} catch {
+  // Ignore in SSR/test environment
+}
 
 export const getAgeCategoriesForSeason = (season: string) => {
   const match = season.match(/(\d{4})/);
@@ -95,23 +148,27 @@ export const DataService = {
     try {
       const snap = await getDocs(collection(db, 'tournaments'));
       if (!snap.empty) {
-        return snap.docs.map(d => ({ id: d.id, ...d.data() } as Tournament));
+        const firestoreList = snap.docs.map(d => ({ id: d.id, ...d.data() } as Tournament));
+        return deduplicateById(firestoreList);
       }
     } catch (e) {
       console.warn("Firestore fetch error, falling back to cached local storage:", e);
     }
-    return getLocal<Tournament>(STORAGE_KEYS.TOURNAMENTS, INITIAL_TOURNAMENTS);
+    const localList = getLocal<Tournament>(STORAGE_KEYS.TOURNAMENTS, INITIAL_TOURNAMENTS);
+    return deduplicateById(localList);
   },
 
   async addTournament(tournament: Omit<Tournament, 'id'>): Promise<Tournament> {
+    const tempId = `tourn-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
     const newTournament: Tournament = {
       ...tournament,
-      id: `tourn-${Date.now()}`
+      id: tempId
     };
 
     // Always update local cache first for instant feedback
     const localList = getLocal<Tournament>(STORAGE_KEYS.TOURNAMENTS, INITIAL_TOURNAMENTS);
-    const updated = [newTournament, ...localList];
+    const filtered = localList.filter(t => t.id !== tempId);
+    const updated = [newTournament, ...filtered];
     setLocal(STORAGE_KEYS.TOURNAMENTS, updated);
 
     // Sync to Firestore if online
@@ -120,7 +177,13 @@ export const DataService = {
         ...tournament,
         createdAt: Timestamp.now()
       });
-      newTournament.id = docRef.id;
+      const realId = docRef.id;
+      newTournament.id = realId;
+
+      // Update local cache with the Firestore ID
+      const currentList = getLocal<Tournament>(STORAGE_KEYS.TOURNAMENTS, INITIAL_TOURNAMENTS);
+      const synced = currentList.map(t => t.id === tempId ? { ...t, id: realId } : t);
+      setLocal(STORAGE_KEYS.TOURNAMENTS, synced);
     } catch (e) {
       console.warn("Saved locally; Firestore sync pending:", e);
     }
@@ -214,21 +277,25 @@ export const DataService = {
     try {
       const snap = await getDocs(collection(db, 'matches'));
       if (!snap.empty) {
-        return snap.docs.map(d => ({ id: d.id, ...d.data() } as Match));
+        const firestoreList = snap.docs.map(d => ({ id: d.id, ...d.data() } as Match));
+        return deduplicateById(firestoreList);
       }
     } catch (e) {
       console.warn("Firestore fetch matches error, falling back to cache:", e);
     }
-    return getLocal<Match>(STORAGE_KEYS.MATCHES, INITIAL_MATCHES);
+    const localList = getLocal<Match>(STORAGE_KEYS.MATCHES, INITIAL_MATCHES);
+    return deduplicateById(localList);
   },
 
   async addMatch(match: Omit<Match, 'id'>): Promise<Match> {
+    const tempId = `mat-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
     const newMatch: Match = {
       ...match,
-      id: `mat-${Date.now()}`
+      id: tempId
     };
     const localList = getLocal<Match>(STORAGE_KEYS.MATCHES, INITIAL_MATCHES);
-    const updated = [newMatch, ...localList];
+    const filtered = localList.filter(m => m.id !== tempId);
+    const updated = [newMatch, ...filtered];
     setLocal(STORAGE_KEYS.MATCHES, updated);
 
     try {
@@ -236,7 +303,12 @@ export const DataService = {
         ...match,
         updatedAt: Timestamp.now()
       });
-      newMatch.id = docRef.id;
+      const realId = docRef.id;
+      newMatch.id = realId;
+
+      const currentList = getLocal<Match>(STORAGE_KEYS.MATCHES, INITIAL_MATCHES);
+      const synced = currentList.map(m => m.id === tempId ? { ...m, id: realId } : m);
+      setLocal(STORAGE_KEYS.MATCHES, synced);
     } catch (e) {
       console.warn("Match saved locally:", e);
     }
@@ -328,21 +400,25 @@ export const DataService = {
     try {
       const snap = await getDocs(collection(db, 'schools'));
       if (!snap.empty) {
-        return snap.docs.map(d => ({ id: d.id, ...d.data() } as School));
+        const firestoreList = snap.docs.map(d => ({ id: d.id, ...d.data() } as School));
+        return deduplicateById(firestoreList);
       }
     } catch (e) {
       console.warn("Firestore schools fetch error:", e);
     }
-    return getLocal<School>(STORAGE_KEYS.SCHOOLS, INITIAL_SCHOOLS);
+    const localList = getLocal<School>(STORAGE_KEYS.SCHOOLS, INITIAL_SCHOOLS);
+    return deduplicateById(localList);
   },
 
   async addSchool(school: Omit<School, 'id'>): Promise<School> {
+    const tempId = `sch-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
     const newSchool: School = {
       ...school,
-      id: `sch-${Date.now()}`
+      id: tempId
     };
     const localList = getLocal<School>(STORAGE_KEYS.SCHOOLS, INITIAL_SCHOOLS);
-    const updated = [newSchool, ...localList];
+    const filtered = localList.filter(s => s.id !== tempId);
+    const updated = [newSchool, ...filtered];
     setLocal(STORAGE_KEYS.SCHOOLS, updated);
 
     try {
@@ -350,7 +426,12 @@ export const DataService = {
         ...school,
         createdAt: Timestamp.now()
       });
-      newSchool.id = docRef.id;
+      const realId = docRef.id;
+      newSchool.id = realId;
+
+      const currentList = getLocal<School>(STORAGE_KEYS.SCHOOLS, INITIAL_SCHOOLS);
+      const synced = currentList.map(s => s.id === tempId ? { ...s, id: realId } : s);
+      setLocal(STORAGE_KEYS.SCHOOLS, synced);
     } catch (e) {
       console.warn("Saved school locally:", e);
     }
@@ -389,21 +470,25 @@ export const DataService = {
     try {
       const snap = await getDocs(collection(db, 'venues'));
       if (!snap.empty) {
-        return snap.docs.map(d => ({ id: d.id, ...d.data() } as Venue));
+        const firestoreList = snap.docs.map(d => ({ id: d.id, ...d.data() } as Venue));
+        return deduplicateById(firestoreList);
       }
     } catch (e) {
       console.warn("Firestore venues fetch error:", e);
     }
-    return getLocal<Venue>(STORAGE_KEYS.VENUES, INITIAL_VENUES);
+    const localList = getLocal<Venue>(STORAGE_KEYS.VENUES, INITIAL_VENUES);
+    return deduplicateById(localList);
   },
 
   async addVenue(venue: Omit<Venue, 'id'>): Promise<Venue> {
+    const tempId = `ven-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
     const newVenue: Venue = {
       ...venue,
-      id: `ven-${Date.now()}`
+      id: tempId
     };
     const localList = getLocal<Venue>(STORAGE_KEYS.VENUES, INITIAL_VENUES);
-    const updated = [newVenue, ...localList];
+    const filtered = localList.filter(v => v.id !== tempId);
+    const updated = [newVenue, ...filtered];
     setLocal(STORAGE_KEYS.VENUES, updated);
 
     try {
@@ -411,7 +496,12 @@ export const DataService = {
         ...venue,
         createdAt: Timestamp.now()
       });
-      newVenue.id = docRef.id;
+      const realId = docRef.id;
+      newVenue.id = realId;
+
+      const currentList = getLocal<Venue>(STORAGE_KEYS.VENUES, INITIAL_VENUES);
+      const synced = currentList.map(v => v.id === tempId ? { ...v, id: realId } : v);
+      setLocal(STORAGE_KEYS.VENUES, synced);
     } catch (e) {
       console.warn("Saved venue locally:", e);
     }
@@ -458,25 +548,57 @@ export const DataService = {
       explicitReferees = getLocal<Referee>('referees', []);
     }
 
-    // Automatically fill referees from teachers who have referee data filled
-    let teacherReferees: Referee[] = [];
+    // Helper text normalizer for name matching
+    const norm = (s?: string) => (s || '').replace(/[\s\-\_\.]/g, '').replace(/[أإآ]/g, 'ا').replace(/ة/g, 'ه').replace(/ى/g, 'ي').toLowerCase();
+
+    // Fetch teachers/users to sync phone numbers and teacher referees
+    let usersList: User[] = [];
     try {
-      const teachers = await this.getTeachers();
-      teacherReferees = teachers
-        .filter(t => Array.isArray(t.refereeSpecialty) ? t.refereeSpecialty.length > 0 : !!t.refereeSpecialty)
-        .map(t => ({
-          id: t.id,
-          fullName: t.fullName + ' (أستاذ)',
-          phone: t.phone || 'غير محدد',
-          specialty: t.refereeSpecialty,
-          isActive: t.isActive,
-          isTeacher: true
-        }));
+      usersList = await this.getUsers();
     } catch (e) {
-      console.warn("Failed to extract teacher referees:", e);
+      console.warn("Failed to fetch users for referee merge:", e);
     }
 
-    return [...teacherReferees, ...explicitReferees];
+    // Merge latest phone numbers into explicit referees if a user profile has a fresher phone
+    explicitReferees = explicitReferees.map(r => {
+      const matchedUser = usersList.find(u => 
+        u.id === r.id || 
+        (u.fullName && r.fullName && (norm(u.fullName) === norm(r.fullName) || norm(u.fullName).includes(norm(r.fullName)) || norm(r.fullName).includes(norm(u.fullName))))
+      );
+      if (matchedUser && matchedUser.phone && matchedUser.phone.trim()) {
+        return {
+          ...r,
+          phone: matchedUser.phone.trim(),
+          photoUrl: matchedUser.photoUrl || r.photoUrl
+        };
+      }
+      return r;
+    });
+
+    // Automatically fill referees from teachers who have referee data filled
+    const teacherReferees: Referee[] = usersList
+      .filter(t => t.role === 'TEACHER' && (Array.isArray(t.refereeSpecialty) ? t.refereeSpecialty.length > 0 : !!t.refereeSpecialty))
+      .map(t => ({
+        id: t.id,
+        fullName: t.fullName + ' (أستاذ)',
+        phone: t.phone || 'غير محدد',
+        specialty: Array.isArray(t.refereeSpecialty) ? t.refereeSpecialty : [t.refereeSpecialty || 'كرة القدم'],
+        isActive: t.isActive !== false,
+        isTeacher: true,
+        photoUrl: t.photoUrl
+      }));
+
+    // Deduplicate by ID and normalized name
+    const combined = [...explicitReferees, ...teacherReferees];
+    const uniqueMap = new Map<string, Referee>();
+    combined.forEach(r => {
+      const key = norm(r.fullName.replace(/\s*\(أستاذ\)\s*/g, ''));
+      if (!uniqueMap.has(key) || (r.phone && r.phone !== 'غير محدد' && !uniqueMap.get(key)?.phone)) {
+        uniqueMap.set(key, r);
+      }
+    });
+
+    return Array.from(uniqueMap.values());
   },
 
   async addReferee(referee: Omit<Referee, 'id'>): Promise<Referee> {
@@ -498,7 +620,12 @@ export const DataService = {
 
   async updateReferee(id: string, updates: Partial<Referee>): Promise<void> {
     const list = getLocal<Referee>('referees', []);
-    setLocal('referees', list.map(r => r.id === id ? { ...r, ...updates } : r));
+    const norm = (s?: string) => (s || '').replace(/[\s\-\_\.]/g, '').replace(/[أإآ]/g, 'ا').replace(/ة/g, 'ه').replace(/ى/g, 'ي').toLowerCase();
+    
+    const targetRef = list.find(r => r.id === id);
+    const updated = list.map(r => r.id === id ? { ...r, ...updates } : r);
+    setLocal('referees', updated);
+
     try {
       await updateDoc(doc(db, 'referees', id), {
         ...updates,
@@ -506,6 +633,26 @@ export const DataService = {
       });
     } catch (e) {
       console.warn("Updated referee locally:", e);
+    }
+
+    // Bidirectional sync: if this referee has a user profile (or matching name like عثماني خالد), update the user profile phone as well!
+    if (updates.phone || updates.fullName) {
+      try {
+        const users = await this.getUsers();
+        const refName = updates.fullName || targetRef?.fullName || '';
+        const matchedUser = users.find(u => 
+          u.id === id || 
+          (refName && u.fullName && (norm(u.fullName) === norm(refName) || norm(u.fullName).includes(norm(refName)) || norm(refName).includes(norm(u.fullName))))
+        );
+        if (matchedUser) {
+          await this.updateUserProfile(matchedUser.id, {
+            ...(updates.phone ? { phone: updates.phone } : {}),
+            ...(updates.fullName ? { fullName: updates.fullName } : {})
+          });
+        }
+      } catch (err) {
+        console.warn("Error syncing referee update to user profile:", err);
+      }
     }
   },
 
@@ -520,26 +667,34 @@ export const DataService = {
   },
 
   // USERS / TEACHERS
-  async getTeachers(): Promise<User[]> {
+  async getUsers(): Promise<User[]> {
     try {
       const snap = await getDocs(collection(db, 'users'));
       if (!snap.empty) {
-        return snap.docs
-          .map(d => ({ id: d.id, ...d.data() } as User))
-          .filter(u => u.role === 'TEACHER');
+        const firestoreList = snap.docs.map(d => ({ id: d.id, ...d.data() } as User));
+        return deduplicateById(firestoreList);
       }
     } catch (e) {
-      console.warn("Firestore fetch teachers error, falling back to cached list:", e);
+      console.warn("Firestore fetch users error, falling back to cached list:", e);
     }
-    // Fallback to local storage if offline or empty
     try {
       const localUsersRaw = localStorage.getItem('local_registered_users');
       if (localUsersRaw) {
         const users = JSON.parse(localUsersRaw) as User[];
-        return users.filter(u => u.role === 'TEACHER');
+        return deduplicateById(users);
       }
     } catch {}
     return [];
+  },
+
+  async getTeachers(): Promise<User[]> {
+    try {
+      const allUsers = await this.getUsers();
+      return allUsers.filter(u => u.role === 'TEACHER');
+    } catch (e) {
+      console.warn("Firestore fetch teachers error:", e);
+      return [];
+    }
   },
 
   async updateUserProfile(userId: string, profileData: Partial<User>): Promise<void> {
@@ -575,8 +730,168 @@ export const DataService = {
         users.push({ ...profileData, id: userId, createdAt: new Date(), updatedAt: new Date() });
       }
       localStorage.setItem('local_registered_users', JSON.stringify(users));
+
+      // Synchronize changes to Schools (teacherName & teacher phone)
+      if (profileData.workLocation || profileData.fullName || profileData.phone) {
+        const schoolsList = getLocal<School>(STORAGE_KEYS.SCHOOLS, INITIAL_SCHOOLS);
+        let schoolChanged = false;
+        const updatedSchools = schoolsList.map(sch => {
+          const matchesWork = profileData.workLocation && (
+            sch.name.trim().toLowerCase() === profileData.workLocation.trim().toLowerCase() ||
+            sch.name.includes(profileData.workLocation) ||
+            profileData.workLocation.includes(sch.name)
+          );
+          const matchesTeacherName = profileData.fullName && sch.teacherName && (
+            sch.teacherName.trim().toLowerCase() === profileData.fullName.trim().toLowerCase()
+          );
+
+          if (matchesWork || matchesTeacherName) {
+            schoolChanged = true;
+            return {
+              ...sch,
+              ...(profileData.fullName ? { teacherName: profileData.fullName } : {}),
+              ...(profileData.phone ? { phone: profileData.phone } : {})
+            };
+          }
+          return sch;
+        });
+
+        if (schoolChanged) {
+          setLocal(STORAGE_KEYS.SCHOOLS, updatedSchools);
+          try {
+            const matched = updatedSchools.filter(s => {
+              const prev = schoolsList.find(ps => ps.id === s.id);
+              return prev && (prev.phone !== s.phone || prev.teacherName !== s.teacherName);
+            });
+            for (const ms of matched) {
+              await updateDoc(doc(db, 'schools', ms.id), {
+                teacherName: ms.teacherName,
+                phone: ms.phone,
+                updatedAt: Timestamp.now()
+              }).catch(() => {});
+            }
+          } catch (e) {
+            console.warn("Error syncing teacher phone to schools Firestore:", e);
+          }
+        }
+      }
+
+      // Synchronize changes to Referees list (e.g. Othmani Khalid / عثماني خالد and all teacher referees)
+      if (profileData.phone || profileData.fullName || profileData.refereeSpecialty) {
+        const norm = (s?: string) => (s || '').replace(/[\s\-\_\.]/g, '').replace(/[أإآ]/g, 'ا').replace(/ة/g, 'ه').replace(/ى/g, 'ي').toLowerCase();
+        const refList = getLocal<Referee>('referees', []);
+        let refChanged = false;
+        const targetName = profileData.fullName;
+        
+        const updatedRefList = refList.map(r => {
+          const matchId = r.id === userId;
+          const matchName = targetName && r.fullName && (
+            norm(r.fullName) === norm(targetName) ||
+            norm(r.fullName).includes(norm(targetName)) ||
+            norm(targetName).includes(norm(r.fullName))
+          );
+
+          if (matchId || matchName) {
+            refChanged = true;
+            return {
+              ...r,
+              ...(profileData.phone ? { phone: profileData.phone } : {}),
+              ...(profileData.fullName ? { fullName: profileData.fullName } : {}),
+              ...(profileData.refereeSpecialty ? { specialty: Array.isArray(profileData.refereeSpecialty) ? profileData.refereeSpecialty : [profileData.refereeSpecialty] } : {})
+            };
+          }
+          return r;
+        });
+
+        if (refChanged) {
+          setLocal('referees', updatedRefList);
+          try {
+            const matched = updatedRefList.filter(r => {
+              const matchId = r.id === userId;
+              const matchName = targetName && r.fullName && (norm(r.fullName) === norm(targetName) || norm(r.fullName).includes(norm(targetName)));
+              return matchId || matchName;
+            });
+            for (const mr of matched) {
+              await updateDoc(doc(db, 'referees', mr.id), {
+                ...(profileData.phone ? { phone: profileData.phone } : {}),
+                ...(profileData.fullName ? { fullName: profileData.fullName } : {}),
+                updatedAt: Timestamp.now()
+              }).catch(() => {});
+            }
+          } catch (e) {
+            console.warn("Error syncing referee phone to Firestore:", e);
+          }
+        }
+      }
     } catch (err) {
       console.warn("Local storage update profile error:", err);
+    }
+  },
+
+  // Direct phone update for teacher, school principal, or referee
+  async updateContactPhone(target: {
+    type: 'teacher' | 'school' | 'principal' | 'referee';
+    id?: string;
+    schoolId?: string;
+    schoolName?: string;
+    name?: string;
+    phone: string;
+  }): Promise<void> {
+    const cleanPhone = target.phone.trim();
+    if (!cleanPhone) return;
+
+    // 1. If it's a School or Principal
+    if (target.type === 'principal' || target.type === 'school') {
+      const schoolsList = getLocal<School>(STORAGE_KEYS.SCHOOLS, INITIAL_SCHOOLS);
+      const targetSchool = schoolsList.find(s => 
+        (target.schoolId && s.id === target.schoolId) ||
+        (target.id && s.id === target.id) ||
+        (target.schoolName && (s.name === target.schoolName || s.name.includes(target.schoolName)))
+      );
+
+      if (targetSchool) {
+        const fieldToUpdate = target.type === 'principal' ? { principalPhone: cleanPhone } : { phone: cleanPhone };
+        await this.updateSchool(targetSchool.id, fieldToUpdate);
+      }
+    }
+
+    // 2. If it's a Teacher
+    if (target.type === 'teacher') {
+      const allUsers = await this.getUsers();
+      const matchedUser = allUsers.find(u => 
+        (target.id && u.id === target.id) ||
+        (target.name && u.fullName === target.name) ||
+        (target.schoolName && u.workLocation && (u.workLocation === target.schoolName || target.schoolName.includes(u.workLocation)))
+      );
+
+      if (matchedUser) {
+        await this.updateUserProfile(matchedUser.id, { phone: cleanPhone });
+      }
+
+      // Also update matching school's teacher phone
+      const schoolsList = getLocal<School>(STORAGE_KEYS.SCHOOLS, INITIAL_SCHOOLS);
+      const targetSchool = schoolsList.find(s => 
+        (target.schoolId && s.id === target.schoolId) ||
+        (target.schoolName && (s.name === target.schoolName || s.name.includes(target.schoolName))) ||
+        (target.name && s.teacherName && s.teacherName === target.name)
+      );
+      if (targetSchool) {
+        await this.updateSchool(targetSchool.id, { phone: cleanPhone });
+      }
+    }
+
+    // 3. If it's a Referee
+    if (target.type === 'referee') {
+      const referees = await this.getReferees();
+      const matchedRef = referees.find(r => 
+        (target.id && r.id === target.id) ||
+        (target.name && (r.fullName === target.name || r.fullName.includes(target.name)))
+      );
+      if (matchedRef && !matchedRef.isTeacher) {
+        await this.updateReferee(matchedRef.id, { phone: cleanPhone });
+      } else if (matchedRef && matchedRef.isTeacher) {
+        await this.updateUserProfile(matchedRef.id, { phone: cleanPhone });
+      }
     }
   },
 
@@ -642,42 +957,181 @@ export const DataService = {
 
   // SPORTS CONFIGURATION
   async getSportsConfig(): Promise<Sport[]> {
+    let fetchedSports: Sport[] = [];
     try {
       const snap = await getDocs(collection(db, 'sports'));
       if (!snap.empty) {
-        return snap.docs.map(d => ({ id: d.id, ...d.data() } as Sport));
+        fetchedSports = snap.docs.map(d => ({ id: d.id, ...d.data() } as Sport));
       }
     } catch (e) {
       console.warn("Firestore fetch sports error, falling back to local cache:", e);
     }
 
-    // Fallback/Initial Setup
-    const localConfig = getLocal<Sport>('taourirt_sports_config', []);
-    if (localConfig.length > 0) {
-      return localConfig;
+    if (fetchedSports.length === 0) {
+      fetchedSports = getLocal<Sport>('taourirt_sports_config', []);
     }
 
-    // Default configuration: all sports are associated with all categories by default
-    const allCategoryIds = AGE_CATEGORIES.map(c => c.id);
-    const defaults: Sport[] = Object.entries(SPORTS_MAP).map(([id, s]) => ({
-      id,
-      name: s.name,
-      description: `منافسات ${s.name} الإقليمية`,
-      ageCategories: allCategoryIds
-    }));
+    const allCategoryIds = getAgeCategoriesForSeason('2026/2027').map(c => c.id);
 
-    setLocal('taourirt_sports_config', defaults);
-    return defaults;
+    // 1. Merge default base sports
+    const mergedBase: Sport[] = Object.entries(BASE_SPORTS).map(([id, s]) => {
+      const existing = fetchedSports.find(item => item.id === id);
+      if (existing) {
+        return {
+          ...existing,
+          name: existing.name || s.name,
+          icon: existing.icon || s.icon,
+          description: existing.description || `منافسات ${s.name} الإقليمية`
+        };
+      }
+      return {
+        id,
+        name: s.name,
+        icon: s.icon,
+        description: `منافسات ${s.name} الإقليمية`,
+        ageCategories: allCategoryIds,
+        studentLimit: 0,
+        athleticsSpecialties: []
+      };
+    });
+
+    // 2. Custom sports created by central admin (any sport in fetchedSports not in BASE_SPORTS)
+    const customSports: Sport[] = fetchedSports
+      .filter(item => !Object.prototype.hasOwnProperty.call(BASE_SPORTS, item.id))
+      .map(item => ({
+        ...item,
+        name: item.name || 'رياضة جديدة',
+        icon: item.icon || '🏆',
+        description: item.description || `منافسات ${item.name || 'رياضة جديدة'} المدرسية`,
+        ageCategories: item.ageCategories || allCategoryIds,
+        studentLimit: item.studentLimit !== undefined ? item.studentLimit : 0,
+        athleticsSpecialties: item.athleticsSpecialties || [],
+        isCustom: true
+      }));
+
+    const allSports = deduplicateById<Sport>([...mergedBase, ...customSports]);
+
+    // Keep SPORTS_MAP in sync with all current sports
+    allSports.forEach(s => {
+      SPORTS_MAP[s.id] = { name: s.name, icon: s.icon || '🏆' };
+    });
+
+    // Cache custom sports in localStorage for instantaneous boot
+    const customListOnly = allSports.filter(s => s.isCustom);
+    if (customListOnly.length > 0) {
+      localStorage.setItem('taourirt_custom_sports', JSON.stringify(customListOnly.map(s => ({ id: s.id, name: s.name, icon: s.icon || '🏆' }))));
+    }
+
+    setLocal('taourirt_sports_config', allSports);
+    return allSports;
   },
 
-  async updateSportCategories(sportId: string, ageCategories: string[]): Promise<void> {
+  async addSport(sport: {
+    name: string;
+    id?: string;
+    icon?: string;
+    description?: string;
+    ageCategories: string[];
+    studentLimit?: number;
+    athleticsSpecialties?: string[];
+  }): Promise<Sport> {
+    const cleanName = sport.name.trim();
+    // Unique ID from latin characters or sport_timestamp
+    let sportId = (sport.id || '').trim().toLowerCase().replace(/[^a-z0-9_]/g, '_').replace(/^_+|_+$/g, '');
+    if (!sportId) {
+      sportId = `sport_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+    }
+
+    const newSport: Sport = {
+      id: sportId,
+      name: cleanName,
+      icon: sport.icon || '🏆',
+      description: sport.description?.trim() || `منافسات ${cleanName} المدرسية الإقليمية`,
+      ageCategories: sport.ageCategories,
+      studentLimit: sport.studentLimit !== undefined ? sport.studentLimit : 0,
+      athleticsSpecialties: sport.athleticsSpecialties || [],
+      isCustom: true,
+      createdAt: new Date().toISOString()
+    };
+
+    // Register immediately in runtime SPORTS_MAP
+    SPORTS_MAP[sportId] = { name: newSport.name, icon: newSport.icon || '🏆' };
+
+    const currentSports = await this.getSportsConfig();
+    const updatedSports = deduplicateById<Sport>([...currentSports.filter(s => s.id !== sportId), newSport]);
+    setLocal('taourirt_sports_config', updatedSports);
+
+    const customOnly = updatedSports.filter(s => s.isCustom);
+    localStorage.setItem('taourirt_custom_sports', JSON.stringify(customOnly.map(s => ({ id: s.id, name: s.name, icon: s.icon || '🏆' }))));
+
+    try {
+      await setDoc(doc(db, 'sports', sportId), {
+        ...newSport,
+        updatedAt: serverTimestamp()
+      });
+    } catch (e) {
+      console.warn("Added custom sport locally, Firestore pending:", e);
+    }
+
+    return newSport;
+  },
+
+  async deleteSport(sportId: string): Promise<void> {
+    // Delete from runtime SPORTS_MAP if custom
+    if (SPORTS_MAP[sportId] && !BASE_SPORTS[sportId]) {
+      delete SPORTS_MAP[sportId];
+    }
+
+    const currentSports = await this.getSportsConfig();
+    const updatedSports = currentSports.filter(s => s.id !== sportId);
+    setLocal('taourirt_sports_config', updatedSports);
+
+    const customOnly = updatedSports.filter(s => s.isCustom);
+    localStorage.setItem('taourirt_custom_sports', JSON.stringify(customOnly.map(s => ({ id: s.id, name: s.name, icon: s.icon || '🏆' }))));
+
+    try {
+      await deleteDoc(doc(db, 'sports', sportId));
+    } catch (e) {
+      console.warn("Deleted custom sport locally, Firestore pending:", e);
+    }
+  },
+
+  async updateSportCategories(
+    sportId: string,
+    ageCategories: string[],
+    studentLimit?: number,
+    athleticsSpecialties?: string[],
+    name?: string,
+    icon?: string
+  ): Promise<void> {
     const list = await this.getSportsConfig();
-    const updated = list.map(s => s.id === sportId ? { ...s, ageCategories } : s);
+    const updated = list.map(s => {
+      if (s.id !== sportId) return s;
+      return {
+        ...s,
+        ageCategories,
+        studentLimit,
+        athleticsSpecialties,
+        name: name || s.name,
+        icon: icon || s.icon
+      };
+    });
     setLocal('taourirt_sports_config', updated);
+
+    if (name || icon) {
+      SPORTS_MAP[sportId] = {
+        name: name || SPORTS_MAP[sportId]?.name || 'الرياضة',
+        icon: icon || SPORTS_MAP[sportId]?.icon || '🏆'
+      };
+    }
 
     try {
       await setDoc(doc(db, 'sports', sportId), {
         ageCategories,
+        studentLimit: studentLimit !== undefined ? studentLimit : null,
+        athleticsSpecialties: athleticsSpecialties !== undefined ? athleticsSpecialties : null,
+        ...(name ? { name } : {}),
+        ...(icon ? { icon } : {}),
         updatedAt: serverTimestamp()
       }, { merge: true });
     } catch (e) {
@@ -690,12 +1144,14 @@ export const DataService = {
     try {
       const snap = await getDocs(collection(db, 'students'));
       if (!snap.empty) {
-        return snap.docs.map(d => ({ id: d.id, ...d.data() } as Student));
+        const firestoreList = snap.docs.map(d => ({ id: d.id, ...d.data() } as Student));
+        return deduplicateById(firestoreList);
       }
     } catch (e) {
       console.warn("Firestore fetch students error, using local storage:", e);
     }
-    return getLocal<Student>('taourirt_students_data', []);
+    const localList = getLocal<Student>('taourirt_students_data', []);
+    return deduplicateById(localList);
   },
 
   async addStudent(student: Omit<Student, 'id' | 'createdAt' | 'updatedAt'>): Promise<Student> {
@@ -731,6 +1187,21 @@ export const DataService = {
       await deleteDoc(doc(db, 'students', id));
     } catch (e) {
       console.warn("Deleted student locally:", e);
+    }
+  },
+
+  async updateStudent(id: string, student: Partial<Student>): Promise<void> {
+    const localList = getLocal<Student>('taourirt_students_data', []);
+    const updated = localList.map(s => s.id === id ? { ...s, ...student, updatedAt: new Date().toISOString() } : s);
+    setLocal('taourirt_students_data', updated);
+
+    try {
+      await updateDoc(doc(db, 'students', id), {
+        ...student,
+        updatedAt: serverTimestamp()
+      });
+    } catch (e) {
+      console.warn("Updated student locally; Firestore sync pending:", e);
     }
   },
 

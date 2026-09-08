@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { School } from '../types';
-import { X, School as SchoolIcon, MapPin, User, Phone, Layers } from 'lucide-react';
+import { X, School as SchoolIcon, MapPin, User, Phone, PhoneCall, Layers } from 'lucide-react';
 
 interface CreateSchoolModalProps {
   isOpen: boolean;
@@ -20,6 +20,7 @@ export const CreateSchoolModal: React.FC<CreateSchoolModalProps> = ({
   const [commune, setCommune] = useState(initialData?.commune || 'تاوريرت');
   const [teacherName, setTeacherName] = useState(initialData?.teacherName || '');
   const [phone, setPhone] = useState(initialData?.phone || '');
+  const [principalPhone, setPrincipalPhone] = useState(initialData?.principalPhone || '');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Sync initialData when opening for edit
@@ -30,12 +31,14 @@ export const CreateSchoolModal: React.FC<CreateSchoolModalProps> = ({
       setCommune(initialData.commune);
       setTeacherName(initialData.teacherName);
       setPhone(initialData.phone || '');
+      setPrincipalPhone(initialData.principalPhone || '');
     } else {
       setName('');
       setType('تأهيلي');
       setCommune('تاوريرت');
       setTeacherName('');
       setPhone('');
+      setPrincipalPhone('');
     }
   }, [initialData, isOpen]);
 
@@ -55,7 +58,8 @@ export const CreateSchoolModal: React.FC<CreateSchoolModalProps> = ({
         type,
         commune: commune.trim(),
         teacherName: teacherName.trim(),
-        phone: phone.trim() || undefined
+        phone: phone.trim() || undefined,
+        principalPhone: principalPhone.trim() || undefined
       });
       onClose();
     } finally {
@@ -75,7 +79,7 @@ export const CreateSchoolModal: React.FC<CreateSchoolModalProps> = ({
               <h3 className="text-sm font-bold text-slate-800">
                 {initialData ? 'تعديل بيانات المؤسسة المشاركة' : 'إضافة مؤسسة تعليمية مشاركة'}
               </h3>
-              <p className="text-[11px] text-slate-500 font-medium">تسجيل المؤسسة والفرق التابعة لها بمديرية تاوريرت</p>
+              <p className="text-[11px] text-slate-500 font-medium">تسجيل المؤسسة وأرقام التواصل بمديرية تاوريرت</p>
             </div>
           </div>
           <button
@@ -132,6 +136,7 @@ export const CreateSchoolModal: React.FC<CreateSchoolModalProps> = ({
             </div>
           </div>
 
+          {/* Teacher and Phone */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="block text-xs font-bold text-slate-700 mb-1">الأستاذ المؤطر (EPS) *</label>
@@ -146,15 +151,43 @@ export const CreateSchoolModal: React.FC<CreateSchoolModalProps> = ({
             </div>
 
             <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">رقم الهاتف للتواصل</label>
+              <label className="block text-xs font-bold text-slate-700 mb-1">هاتف الأستاذ المؤطر</label>
+              <div className="relative">
+                <input
+                  type="tel"
+                  value={phone}
+                  onChange={(e) => setPhone(e.target.value)}
+                  placeholder="06XXXXXXXX"
+                  className="w-full text-xs rounded-lg border border-slate-200 px-3 py-2 text-slate-800 font-mono focus:outline-none focus:ring-2 focus:ring-blue-500 text-left pl-8"
+                  dir="ltr"
+                />
+                <Phone className="h-3.5 w-3.5 text-slate-400 absolute left-2.5 top-2.5" />
+              </div>
+            </div>
+          </div>
+
+          {/* School Principal Phone (هاتف مدير المؤسسة) */}
+          <div className="bg-amber-50/60 rounded-xl p-3 border border-amber-200/80">
+            <div className="flex items-center gap-1.5 mb-1.5">
+              <PhoneCall className="h-4 w-4 text-amber-700" />
+              <label className="text-xs font-bold text-amber-950">هاتف مدير المؤسسة التعليمية</label>
+              <span className="text-[10px] bg-amber-200/70 text-amber-900 font-medium px-2 py-0.2 rounded-full mr-auto">
+                متاح للمسير ورئيس اللجنة التقنية
+              </span>
+            </div>
+            <p className="text-[11px] text-amber-800/80 mb-2 font-medium leading-relaxed">
+              يُستعمل للتواصل الإداري مع إدارة المؤسسة، التنسيق الميداني للفرق، ومراسلات البطولة.
+            </p>
+            <div className="relative">
               <input
                 type="tel"
-                value={phone}
-                onChange={(e) => setPhone(e.target.value)}
-                placeholder="06XXXXXXXX"
-                className="w-full text-xs rounded-lg border border-slate-200 px-3 py-2 text-slate-800 font-mono focus:outline-none focus:ring-2 focus:ring-blue-500 text-left"
+                value={principalPhone}
+                onChange={(e) => setPrincipalPhone(e.target.value)}
+                placeholder="06XXXXXXXX أو 05XXXXXXXX"
+                className="w-full text-xs rounded-lg border border-amber-300/80 bg-white px-3 py-2 text-slate-900 font-mono font-bold focus:outline-none focus:ring-2 focus:ring-amber-500 text-left pl-8"
                 dir="ltr"
               />
+              <PhoneCall className="h-3.5 w-3.5 text-amber-600 absolute left-2.5 top-2.5" />
             </div>
           </div>
 

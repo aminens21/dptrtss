@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import { DataService } from '../lib/dataService';
-import { Match, Tournament } from '../types';
+import { DataService, deduplicateById } from '../lib/dataService';
+import { Match, Tournament, School, Venue, Referee, User } from '../types';
 import {
   Trophy,
   CalendarDays,
@@ -12,13 +12,17 @@ import {
   MapPin,
   ArrowLeft,
   ChevronLeft,
-  School,
+  School as SchoolIcon,
   AlertCircle,
   BellRing,
   Activity,
-  Plus
+  Plus,
+  BarChart3,
+  MessageSquare
 } from 'lucide-react';
 import { CreateTournamentModal } from '../components/CreateTournamentModal';
+import { DailyWhatsAppNotificationCenter } from '../components/DailyWhatsAppNotificationCenter';
+import { PWAInstallButton } from '../components/PWAInstallButton';
 import toast from 'react-hot-toast';
 
 export const Dashboard: React.FC = () => {
@@ -30,6 +34,12 @@ export const Dashboard: React.FC = () => {
     schools: 6,
     completedMatches: 1
   });
+  const [tournaments, setTournaments] = useState<Tournament[]>([]);
+  const [matches, setMatches] = useState<Match[]>([]);
+  const [schools, setSchools] = useState<School[]>([]);
+  const [venues, setVenues] = useState<Venue[]>([]);
+  const [referees, setReferees] = useState<Referee[]>([]);
+  const [teachers, setTeachers] = useState<User[]>([]);
   const [recentMatches, setRecentMatches] = useState<Match[]>([]);
   const [teacherMatches, setTeacherMatches] = useState<Match[]>([]);
   const [loading, setLoading] = useState(true);
@@ -45,13 +55,23 @@ export const Dashboard: React.FC = () => {
 
   const loadDashboardData = async () => {
     try {
-      const [tList, mList, sList] = await Promise.all([
+      const [tList, mList, sList, vList, rList, uList] = await Promise.all([
         DataService.getTournaments(),
         DataService.getMatches(),
-        DataService.getSchools()
+        DataService.getSchools(),
+        DataService.getVenues(),
+        DataService.getReferees(),
+        DataService.getUsers()
       ]);
 
       const completed = mList.filter(m => m.status === 'Completed').length;
+
+      setTournaments(tList);
+      setMatches(mList);
+      setSchools(deduplicateById<School>(sList));
+      setVenues(vList);
+      setReferees(rList);
+      setTeachers(uList);
 
       setStats({
         tournaments: tList.length,
@@ -116,32 +136,46 @@ export const Dashboard: React.FC = () => {
           </p>
         </div>
 
-        {isCentralAdmin ? (
+        <div className="flex items-center gap-2 self-start sm:self-auto flex-wrap">
           <button
-            onClick={() => setIsTournamentModalOpen(true)}
-            className="self-start sm:self-auto bg-blue-600 hover:bg-blue-500 text-white px-4 py-2.5 rounded-xl text-xs font-bold flex items-center gap-2 shadow-sm transition-all cursor-pointer shrink-0"
+            type="button"
+            onClick={() => navigate('/statistics')}
+            className="bg-white/10 hover:bg-white/20 text-white border border-white/20 px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition-all cursor-pointer shrink-0"
           >
-            <Plus className="h-4 w-4" />
-            <span>إضافة بطولة جديدة</span>
+            <BarChart3 className="w-3.5 h-3.5" />
+            <span>لوحة الإحصائيات</span>
           </button>
-        ) : isSportManager ? (
-          <button
-            onClick={() => navigate('/matches')}
-            className="self-start sm:self-auto bg-blue-600 hover:bg-blue-500 text-white px-4 py-2.5 rounded-xl text-xs font-bold flex items-center gap-2 shadow-sm transition-all cursor-pointer shrink-0"
-          >
-            <Plus className="h-4 w-4" />
-            <span>برمجة مباراة جديدة</span>
-          </button>
-        ) : (
-          <button
-            onClick={() => navigate('/matches')}
-            className="self-start sm:self-auto bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2.5 rounded-xl text-xs font-bold flex items-center gap-2 shadow-sm transition-all cursor-pointer shrink-0"
-          >
-            <CalendarDays className="h-4 w-4" />
-            <span>استعراض جدول المقابلات والنتائج</span>
-          </button>
-        )}
+
+          {isCentralAdmin ? (
+            <button
+              onClick={() => setIsTournamentModalOpen(true)}
+              className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 shadow-sm transition-all cursor-pointer shrink-0"
+            >
+              <Plus className="h-4 w-4" />
+              <span>إضافة بطولة جديدة</span>
+            </button>
+          ) : isSportManager ? (
+            <button
+              onClick={() => navigate('/matches')}
+              className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 shadow-sm transition-all cursor-pointer shrink-0"
+            >
+              <Plus className="h-4 w-4" />
+              <span>برمجة مباراة جديدة</span>
+            </button>
+          ) : (
+            <button
+              onClick={() => navigate('/matches')}
+              className="bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 shadow-sm transition-all cursor-pointer shrink-0"
+            >
+              <CalendarDays className="h-4 w-4" />
+              <span>استعراض جدول المقابلات</span>
+            </button>
+          )}
+        </div>
       </div>
+
+      {/* PWA Mobile App Installation Banner */}
+      <PWAInstallButton variant="banner" />
 
       {/* High Density 4-Column Stat Cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
@@ -195,20 +229,31 @@ export const Dashboard: React.FC = () => {
 
         {/* Card 4 */}
         <div
-          onClick={() => navigate('/matches')}
+          onClick={() => navigate('/statistics')}
           className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs hover:border-blue-300 transition-all cursor-pointer"
         >
-          <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider mb-1">المباريات المنجزة</p>
+          <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider mb-1">المباريات المنجزة والإحصائيات</p>
           <div className="flex items-end justify-between">
             <h3 className="text-2xl font-bold text-slate-800 tracking-tight">
               {stats.completedMatches}
             </h3>
             <span className="text-amber-600 text-[10px] font-bold bg-amber-50 px-2 py-0.5 rounded border border-amber-100">
-              النتائج الرسمية
+              النتائج والترتيب 🏆
             </span>
           </div>
         </div>
       </div>
+
+      {/* WhatsApp Daily Notification Center (Primary Section) */}
+      <DailyWhatsAppNotificationCenter
+        matches={matches}
+        schools={schools}
+        tournaments={tournaments}
+        venues={venues}
+        referees={referees}
+        teachers={teachers}
+        onRefresh={loadDashboardData}
+      />
 
       {/* Main Content Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -269,30 +314,30 @@ export const Dashboard: React.FC = () => {
             </div>
 
             <div className="flex-1 p-4 space-y-3">
-            {recentMatches.map((m) => (
-              <div
-                key={m.id}
-                onClick={() => navigate('/matches')}
-                className="flex items-center gap-3 p-3 border border-slate-100 rounded-lg hover:border-blue-200 hover:bg-blue-50/20 transition-all cursor-pointer"
-              >
-                <div className="w-16 text-center border-l border-slate-100 pl-2">
-                  <p className="text-xs font-bold text-blue-600">{m.startTime || '10:00'}</p>
-                  <p className="text-[10px] text-slate-400 font-medium">
-                    {m.status === 'Completed' ? 'انتهت' : m.status === 'Ongoing' ? 'مباشر' : 'مبرمجة'}
-                  </p>
-                </div>
-                <div className="flex-1 flex items-center justify-between px-2">
-                  <span className="font-bold text-xs text-slate-800">
-                    {m.stage || 'مباراة إقليمية'}
-                  </span>
-                  <div className="font-black text-xs px-2.5 py-1 bg-slate-100 rounded-md border border-slate-200">
-                    {m.status === 'Completed' ? `${m.score1 || 0} - ${m.score2 || 0}` : 'مقابلة مبرمجة'}
+              {recentMatches.map((m) => (
+                <div
+                  key={m.id}
+                  onClick={() => navigate('/matches')}
+                  className="flex items-center gap-3 p-3 border border-slate-100 rounded-lg hover:border-blue-200 hover:bg-blue-50/20 transition-all cursor-pointer"
+                >
+                  <div className="w-16 text-center border-l border-slate-100 pl-2">
+                    <p className="text-xs font-bold text-blue-600">{m.startTime || '10:00'}</p>
+                    <p className="text-[10px] text-slate-400 font-medium">
+                      {m.status === 'Completed' ? 'انتهت' : m.status === 'Ongoing' ? 'مباشر' : 'مبرمجة'}
+                    </p>
+                  </div>
+                  <div className="flex-1 flex items-center justify-between px-2">
+                    <span className="font-bold text-xs text-slate-800">
+                      {m.stage || 'مباراة إقليمية'}
+                    </span>
+                    <div className="font-black text-xs px-2.5 py-1 bg-slate-100 rounded-md border border-slate-200">
+                      {m.status === 'Completed' ? `${m.score1 || 0} - ${m.score2 || 0}` : 'مقابلة مبرمجة'}
+                    </div>
                   </div>
                 </div>
-              </div>
-            ))}
+              ))}
+            </div>
           </div>
-        </div>
         </div>
 
         {/* Side Panel: Quick Actions & Alerts */}
@@ -310,7 +355,7 @@ export const Dashboard: React.FC = () => {
                 >
                   <span className="flex items-center gap-1.5">
                     <span>👤</span>
-                    <span>تعديل بياناتي وتخصصات التحكيم</span>
+                    <span>تعديل بياناتي وصورتي وتخصصات التحكيم</span>
                   </span>
                   <span>←</span>
                 </button>
@@ -324,15 +369,13 @@ export const Dashboard: React.FC = () => {
                   <span>←</span>
                 </button>
               )}
-              {isSportManager && (
-                <button
-                  onClick={() => navigate('/matches')}
-                  className="w-full text-right p-2.5 bg-blue-50/60 hover:bg-blue-100/60 text-blue-700 rounded-lg text-xs font-bold flex items-center justify-between transition-colors cursor-pointer"
-                >
-                  <span>➕ برمجة مباراة جديدة</span>
-                  <span>←</span>
-                </button>
-              )}
+              <button
+                onClick={() => navigate('/statistics')}
+                className="w-full text-right p-2.5 bg-indigo-50 hover:bg-indigo-100/80 text-indigo-800 rounded-lg text-xs font-bold flex items-center justify-between transition-colors cursor-pointer border border-indigo-200/70"
+              >
+                <span>📊 إحصائيات وترتيب المؤسسات</span>
+                <span>←</span>
+              </button>
               <button
                 onClick={() => navigate('/matches')}
                 className="w-full text-right p-2.5 bg-emerald-50/60 hover:bg-emerald-100/60 text-emerald-800 rounded-lg text-xs font-bold flex items-center justify-between transition-colors cursor-pointer"
@@ -354,22 +397,16 @@ export const Dashboard: React.FC = () => {
                 <span>🏫 المؤسسات والفرق المشاركة</span>
                 <span>←</span>
               </button>
-              <button
-                onClick={() => navigate('/venues')}
-                className="w-full text-right p-2.5 bg-slate-50 hover:bg-slate-100 text-slate-700 rounded-lg text-xs font-bold flex items-center justify-between transition-colors cursor-pointer"
-              >
-                <span>📍 مراكز التباري والقاعات الرياضية</span>
-                <span>←</span>
-              </button>
             </div>
           </div>
 
-          <div className="bg-gradient-to-br from-blue-50 to-indigo-50/50 p-4 rounded-xl border border-blue-100 text-slate-700 text-xs">
-            <h5 className="font-bold text-blue-900 mb-1 flex items-center gap-1.5">
-              <span>📌 مذكرة تنظيمية</span>
+          <div className="bg-gradient-to-br from-emerald-50 to-teal-50/50 p-4 rounded-xl border border-emerald-100 text-slate-700 text-xs">
+            <h5 className="font-bold text-emerald-900 mb-1 flex items-center gap-1.5">
+              <MessageSquare className="w-3.5 h-3.5 text-emerald-600" />
+              <span>تذكير الواتساب التلقائي</span>
             </h5>
-            <p className="text-[11px] text-blue-800/80 leading-relaxed">
-              يرجى التأكد من استكمال لوائح الفرق المشاركة وتعيين حكام المباريات قبل 48 ساعة من انطلاق الإقصائيات.
+            <p className="text-[11px] text-emerald-800/90 leading-relaxed">
+              يمكنك بضغطة زر واحدة إرسال تفاصيل المباراة وموعد الحضور مباشرة إلى واتساب الحكام والمؤطرين ومدراء المؤسسات.
             </p>
           </div>
         </div>
@@ -384,3 +421,4 @@ export const Dashboard: React.FC = () => {
     </div>
   );
 };
+

@@ -19,14 +19,20 @@ export interface User {
   techCommitteeSports?: string[]; // التخصصات الرياضية التي يترأس لجنتها التقنية
   isTechCommitteeMember?: boolean; // عضو لجنة تقنية
   techCommitteeSportsMemberOf?: string[]; // التخصصات الرياضية التي يشارك في لجنتها التقنية كعضو
+  photoUrl?: string; // صورة الأستاذ الشخصية
 }
 
 export interface Sport {
   id: string;
   name: string;
   description: string;
+  icon?: string;
   managerId?: string;
   ageCategories?: string[]; // الفئات المعنية بالتخصص الرياضي التي حددها المسير الرئيسي
+  studentLimit?: number; // السقف الأقصى لعدد التلاميذ المسموح بمشاركتهم من كل مؤسسة في هذا التخصص
+  athleticsSpecialties?: string[]; // تخصصات ألعاب القوى المتاحة (القفز الطولي، القفز العلوي، جري 80 متر...)
+  isCustom?: boolean; // رياضة مضافة من طرف المسير المركزي
+  createdAt?: any;
 }
 
 export interface Tournament {
@@ -36,7 +42,7 @@ export interface Tournament {
   sportId: string;
   ageCategory: string;
   gender: 'Male' | 'Female' | 'Mixed';
-  level: 'Primary' | 'Middle' | 'High';
+  level: 'Primary' | 'Middle' | 'High' | string;
   scope: 'Provincial' | 'Regional';
   startDate: any;
   endDate: any;
@@ -54,7 +60,9 @@ export interface School {
   type: string;
   commune: string;
   teacherName: string;
-  phone?: string;
+  phone?: string; // هاتف الأستاذ المؤطر
+  principalName?: string; // اسم مدير المؤسسة
+  principalPhone?: string; // هاتف مدير المؤسسة
 }
 
 export interface Team {
@@ -73,6 +81,7 @@ export interface Referee {
   specialty?: string[];
   isActive: boolean;
   isTeacher?: boolean;
+  photoUrl?: string;
 }
 
 export interface Match {
@@ -132,6 +141,9 @@ export interface Student {
   schoolName: string; // cache school name
   sportId: string; // chosen sport
   photoUrl?: string; // photo data url or URL
+  participationType?: 'individual' | 'school_team'; // نوع المشاركة في العدو الريفي: فردي أو فريق المؤسسة
+  distance?: string; // المسافة للعدو الريفي (مثلا: 1000 م، 1500 م)
+  athleticsSpecialty?: string; // تخصص ألعاب القوى المحدد (القفز الطولي، القفز العلوي، جري 80 متر...)
   createdAt: any;
   updatedAt: any;
 }

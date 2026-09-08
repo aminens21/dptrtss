@@ -76,12 +76,12 @@ export const INITIAL_TOURNAMENTS: Tournament[] = [
 ];
 
 export const INITIAL_SCHOOLS: School[] = [
-  { id: 'sch-1', name: 'ثانوية الفتح التأهيلية', type: 'تأهيلي', commune: 'تاوريرت المركز', teacherName: 'ذ. عبد الرحيم بلقاسم', phone: '0661234567' },
-  { id: 'sch-2', name: 'ثانوية علال الفاسي التأهيلية', type: 'تأهيلي', commune: 'العيون سيدي ملوك', teacherName: 'ذ. رشيد الداودي', phone: '0662345678' },
-  { id: 'sch-3', name: 'إعدادية ابن سينا', type: 'إعدادي', commune: 'تاوريرت', teacherName: 'ذة. فاطمة الزهراء بنعلي', phone: '0663456789' },
-  { id: 'sch-4', name: 'إعدادية سيدي لحسن', type: 'إعدادي', commune: 'سيدي لحسن', teacherName: 'ذ. حميد بنعيسى', phone: '0664567890' },
-  { id: 'sch-5', name: 'مجموعة مدارس دبدو', type: 'ابتدائي', commune: 'دبدو', teacherName: 'ذ. يوسف المراكشي', phone: '0665678901' },
-  { id: 'sch-6', name: 'ثانوية الزيتون التأهيلية', type: 'تأهيلي', commune: 'تاوريرت', teacherName: 'ذ. مصطفى الغازي', phone: '0666789012' }
+  { id: 'sch-1', name: 'ثانوية الفتح التأهيلية', type: 'تأهيلي', commune: 'تاوريرت المركز', teacherName: 'ذ. عبد الرحيم بلقاسم', phone: '0661234567', principalPhone: '0661998877' },
+  { id: 'sch-2', name: 'ثانوية علال الفاسي التأهيلية', type: 'تأهيلي', commune: 'العيون سيدي ملوك', teacherName: 'ذ. رشيد الداودي', phone: '0662345678', principalPhone: '0662887766' },
+  { id: 'sch-3', name: 'إعدادية ابن سينا', type: 'إعدادي', commune: 'تاوريرت', teacherName: 'ذة. فاطمة الزهراء بنعلي', phone: '0663456789', principalPhone: '0663776655' },
+  { id: 'sch-4', name: 'إعدادية سيدي لحسن', type: 'إعدادي', commune: 'سيدي لحسن', teacherName: 'ذ. حميد بنعيسى', phone: '0664567890', principalPhone: '0664665544' },
+  { id: 'sch-5', name: 'مجموعة مدارس دبدو', type: 'ابتدائي', commune: 'دبدو', teacherName: 'ذ. يوسف المراكشي', phone: '0665678901', principalPhone: '0665554433' },
+  { id: 'sch-6', name: 'ثانوية الزيتون التأهيلية', type: 'تأهيلي', commune: 'تاوريرت', teacherName: 'ذ. مصطفى الغازي', phone: '0666789012', principalPhone: '0666443322' }
 ];
 
 export const INITIAL_VENUES: Venue[] = [

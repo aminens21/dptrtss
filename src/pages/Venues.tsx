@@ -1,6 +1,6 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import { DataService } from '../lib/dataService';
+import { DataService, SPORTS_MAP } from '../lib/dataService';
 import { Venue, Match } from '../types';
 import {
   Plus,
@@ -16,7 +16,8 @@ import {
   CheckCircle,
   Trophy,
   UserCheck,
-  Phone
+  Phone,
+  Filter
 } from 'lucide-react';
 import { CreateVenueModal } from '../components/CreateVenueModal';
 import { ConfirmDeleteModal } from '../components/ConfirmDeleteModal';
@@ -29,6 +30,7 @@ export const Venues: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [cityFilter, setCityFilter] = useState<string>('ALL');
+  const [selectedSport, setSelectedSport] = useState<string>('ALL');
 
   // Modals state
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -39,6 +41,40 @@ export const Venues: React.FC = () => {
   // Both CENTRAL_ADMIN, SPORT_MANAGER and Technical Committee Head can manage venues
   const isTechCommitteeHead = userProfile?.isTechCommitteeHead === true;
   const canManage = userProfile?.role === 'CENTRAL_ADMIN' || userProfile?.role === 'SPORT_MANAGER' || isTechCommitteeHead;
+
+  // Determine user's primary/preferred sport specialty for automatic focus on login
+  const preferredSportId = useMemo(() => {
+    if (!userProfile) return 'ALL';
+    
+    // 1. Sport Manager
+    if (userProfile.role === 'SPORT_MANAGER') {
+      return userProfile.sportId || 'ALL';
+    }
+    
+    // 2. Technical Committee Head
+    if (userProfile.isTechCommitteeHead && userProfile.techCommitteeSports && userProfile.techCommitteeSports.length > 0) {
+      return userProfile.techCommitteeSports[0];
+    }
+    
+    // 3. Technical Committee Member
+    if (userProfile.isTechCommitteeMember && userProfile.techCommitteeSportsMemberOf && userProfile.techCommitteeSportsMemberOf.length > 0) {
+      return userProfile.techCommitteeSportsMemberOf[0];
+    }
+    
+    // 4. Fallback userProfile.sportId
+    if (userProfile.sportId) {
+      return userProfile.sportId;
+    }
+    
+    return 'ALL';
+  }, [userProfile]);
+
+  // Set initial selected sport to user preferred specialty upon login/data load
+  useEffect(() => {
+    if (preferredSportId && preferredSportId !== 'ALL') {
+      setSelectedSport(preferredSportId);
+    }
+  }, [preferredSportId]);
 
   useEffect(() => {
     loadData();
@@ -97,13 +133,25 @@ export const Venues: React.FC = () => {
     return matches.filter(m => m.venueId === venueId && (m.status === 'Scheduled' || m.status === 'Ongoing'));
   };
 
+  const participatingVenueIdsForSport = useMemo(() => {
+    if (selectedSport === 'ALL') return null;
+    const ids = new Set<string>();
+    matches.forEach(m => {
+      if (m.sportId === selectedSport && m.venueId) {
+        ids.add(m.venueId);
+      }
+    });
+    return ids;
+  }, [selectedSport, matches]);
+
   const filtered = venues.filter(v => {
     const matchSearch = v.name.toLowerCase().includes(search.toLowerCase()) ||
                         v.city.toLowerCase().includes(search.toLowerCase()) ||
                         v.address.toLowerCase().includes(search.toLowerCase()) ||
                         (v.notes || '').toLowerCase().includes(search.toLowerCase());
     const matchCity = cityFilter === 'ALL' || v.city === cityFilter;
-    return matchSearch && matchCity;
+    const matchSport = selectedSport === 'ALL' || (participatingVenueIdsForSport && participatingVenueIdsForSport.has(v.id));
+    return matchSearch && matchCity && matchSport;
   });
 
   return (
@@ -137,7 +185,7 @@ export const Venues: React.FC = () => {
       </div>
 
       {/* Filter and search */}
-      <div className="flex flex-col sm:flex-row items-center gap-3 bg-white p-3 rounded-xl border border-slate-200 shadow-xs">
+      <div className="flex flex-col lg:flex-row items-center gap-3 bg-white p-3 rounded-xl border border-slate-200 shadow-xs">
         <div className="flex flex-1 items-center px-2 w-full">
           <Search className="h-4 w-4 text-slate-400 ml-2 shrink-0" />
           <input
@@ -147,6 +195,27 @@ export const Venues: React.FC = () => {
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
+        </div>
+
+        {/* Sport Filter Dropdown */}
+        <div className="flex items-center gap-2 w-full lg:w-auto border-t lg:border-t-0 lg:border-r border-slate-100 pt-2 lg:pt-0 lg:pr-3 shrink-0">
+          <label htmlFor="venues-sport-filter" className="text-xs font-bold text-slate-600 whitespace-nowrap flex items-center gap-1.5">
+            <Filter className="h-3.5 w-3.5 text-blue-600" />
+            <span>الرياضة:</span>
+          </label>
+          <select
+            id="venues-sport-filter"
+            value={selectedSport}
+            onChange={(e) => setSelectedSport(e.target.value)}
+            className="text-xs font-bold text-slate-700 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer min-w-[160px]"
+          >
+            <option value="ALL">🏆 جميع الرياضات</option>
+            {Object.entries(SPORTS_MAP).map(([id, info]) => (
+              <option key={id} value={id}>
+                {info.icon} {info.name}
+              </option>
+            ))}
+          </select>
         </div>
 
         <div className="flex items-center gap-1.5 overflow-x-auto w-full sm:w-auto pb-1 sm:pb-0">

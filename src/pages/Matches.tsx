@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import { DataService, SPORTS_MAP } from '../lib/dataService';
+import { DataService, SPORTS_MAP, deduplicateById } from '../lib/dataService';
 import { Match, School, Venue, Tournament } from '../types';
 import { Plus, Search, CalendarDays, MapPin, Clock, Filter, CheckCircle2, Trophy, UserCheck, KeyRound, Trash2, ShieldCheck, Lock, Pencil, Phone } from 'lucide-react';
 import { CreateMatchModal } from '../components/CreateMatchModal';
@@ -51,12 +51,39 @@ export const Matches: React.FC = () => {
     return assignedTourn?.sportId || 'basketball';
   }, [userProfile, tournaments]);
 
-  // Set initial selected sport to manager specialty if role is SPORT_MANAGER
-  useEffect(() => {
-    if (managerSportId) {
-      setSelectedSport(managerSportId);
+  // Determine user's primary/preferred sport specialty for automatic focus on login
+  const preferredSportId = useMemo(() => {
+    if (!userProfile) return 'ALL';
+    
+    // 1. Sport Manager
+    if (userProfile.role === 'SPORT_MANAGER') {
+      return managerSportId || 'ALL';
     }
-  }, [managerSportId]);
+    
+    // 2. Technical Committee Head
+    if (userProfile.isTechCommitteeHead && userProfile.techCommitteeSports && userProfile.techCommitteeSports.length > 0) {
+      return userProfile.techCommitteeSports[0];
+    }
+    
+    // 3. Technical Committee Member
+    if (userProfile.isTechCommitteeMember && userProfile.techCommitteeSportsMemberOf && userProfile.techCommitteeSportsMemberOf.length > 0) {
+      return userProfile.techCommitteeSportsMemberOf[0];
+    }
+    
+    // 4. Fallback userProfile.sportId (such as teachers with preferred sport)
+    if (userProfile.sportId) {
+      return userProfile.sportId;
+    }
+    
+    return 'ALL';
+  }, [userProfile, tournaments, managerSportId]);
+
+  // Set initial selected sport to user preferred specialty upon login/data load
+  useEffect(() => {
+    if (preferredSportId && preferredSportId !== 'ALL') {
+      setSelectedSport(preferredSportId);
+    }
+  }, [preferredSportId]);
 
   useEffect(() => {
     loadData();
@@ -72,10 +99,10 @@ export const Matches: React.FC = () => {
         DataService.getTournaments(),
         DataService.getActiveSeason()
       ]);
-      setMatches(mList);
-      setSchools(sList);
-      setVenues(vList);
-      setTournaments(tList);
+      setMatches(deduplicateById<Match>(mList));
+      setSchools(deduplicateById<School>(sList));
+      setVenues(deduplicateById<Venue>(vList));
+      setTournaments(deduplicateById<Tournament>(tList));
       if (season) {
         setActiveSeason(season);
       }
@@ -99,12 +126,12 @@ export const Matches: React.FC = () => {
         if (existing) {
           await DataService.updateMatch(matchId, matchData);
           
-          setMatches(prev => prev.map(m => m.id === matchId ? { ...m, ...matchData } : m));
+          setMatches(prev => deduplicateById<Match>(prev.map(m => m.id === matchId ? { ...m, ...matchData } : m)));
           toast.success('تم تعديل المقابلة بنجاح!');
         }
       } else {
         const created = await DataService.addMatch(matchData);
-        setMatches(prev => [created, ...prev]);
+        setMatches(prev => deduplicateById<Match>([created, ...prev]));
         toast.success('تمت برمجة المقابلة بنجاح!');
       }
     } catch (e) {
@@ -355,27 +382,25 @@ export const Matches: React.FC = () => {
         </div>
 
         {/* Sport Filter Dropdown */}
-        {!managerSportId && (
-          <div className="flex items-center gap-2 w-full sm:w-auto border-t sm:border-t-0 sm:border-r border-slate-100 pt-2 sm:pt-0 sm:pr-3 shrink-0">
-            <label htmlFor="matches-sport-filter" className="text-xs font-bold text-slate-600 whitespace-nowrap flex items-center gap-1.5">
-              <Filter className="h-3.5 w-3.5 text-blue-600" />
-              <span>الرياضة:</span>
-            </label>
-            <select
-              id="matches-sport-filter"
-              value={selectedSport}
-              onChange={(e) => setSelectedSport(e.target.value)}
-              className="text-xs font-bold text-slate-700 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer min-w-[160px]"
-            >
-              <option value="ALL">🏆 جميع الرياضات</option>
-              {Object.entries(SPORTS_MAP).map(([id, info]) => (
-                <option key={id} value={id}>
-                  {info.icon} {info.name}
-                </option>
-              ))}
-            </select>
-          </div>
-        )}
+        <div className="flex items-center gap-2 w-full sm:w-auto border-t sm:border-t-0 sm:border-r border-slate-100 pt-2 sm:pt-0 sm:pr-3 shrink-0">
+          <label htmlFor="matches-sport-filter" className="text-xs font-bold text-slate-600 whitespace-nowrap flex items-center gap-1.5">
+            <Filter className="h-3.5 w-3.5 text-blue-600" />
+            <span>الرياضة:</span>
+          </label>
+          <select
+            id="matches-sport-filter"
+            value={selectedSport}
+            onChange={(e) => setSelectedSport(e.target.value)}
+            className="text-xs font-bold text-slate-700 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer min-w-[160px]"
+          >
+            <option value="ALL">🏆 جميع الرياضات</option>
+            {Object.entries(SPORTS_MAP).map(([id, info]) => (
+              <option key={id} value={id}>
+                {info.icon} {info.name}
+              </option>
+            ))}
+          </select>
+        </div>
 
         <div className="flex items-center gap-1.5 w-full sm:w-auto overflow-x-auto pb-1 sm:pb-0">
           {[

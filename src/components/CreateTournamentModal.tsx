@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Tournament, Sport } from '../types';
-import { AGE_CATEGORIES, DataService, getAgeCategoriesForSeason } from '../lib/dataService';
-import { X, Trophy, Calendar, Users, Target, Award, Sparkles, KeyRound, UserCheck, RefreshCw, Check } from 'lucide-react';
+import { AGE_CATEGORIES, DataService, getAgeCategoriesForSeason, SPORTS_MAP } from '../lib/dataService';
+import { X, Trophy, Calendar, Users, Target, Award, Sparkles, ShieldCheck, RefreshCw, Check } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 interface CreateTournamentModalProps {
@@ -17,7 +17,7 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
 }) => {
   const [name, setName] = useState('');
   const [sportId, setSportId] = useState('football');
-  const [level, setLevel] = useState<'Primary' | 'Middle' | 'High'>('High');
+  const [selectedLevels, setSelectedLevels] = useState<('Primary' | 'Middle' | 'High')[]>(['High']);
   
   // Custom states for multi-select categories and gender combinations
   const [selectedCategories, setSelectedCategories] = useState<string[]>(['U15']);
@@ -76,34 +76,10 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
   const [startDate, setStartDate] = useState('2026-03-01');
   const [endDate, setEndDate] = useState('2026-03-30');
   const [description, setDescription] = useState('');
-  
-  // Manager & Access Code
-  const [managerName, setManagerName] = useState('');
-  const [managerPhone, setManagerPhone] = useState('');
-  const [managerEmail, setManagerEmail] = useState('');
-  const [accessCode, setAccessCode] = useState(() => {
-    return 'TR-' + Math.floor(1000 + Math.random() * 9000);
-  });
 
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   if (!isOpen) return null;
-
-  const generateNewCode = () => {
-    const prefixes: Record<string, string> = {
-      football: 'FB',
-      futsal: 'FT',
-      handball: 'HB',
-      volleyball: 'VB',
-      basketball: 'BB',
-      athletics: 'ATH',
-      table_tennis: 'TT',
-      chess: 'CH'
-    };
-    const prefix = prefixes[sportId] || 'TR';
-    const rand = Math.floor(1000 + Math.random() * 9000);
-    setAccessCode(`${prefix}-${rand}`);
-  };
 
   const handleToggleCategory = (catId: string) => {
     setSelectedCategories(prev =>
@@ -113,6 +89,8 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSubmitting) return;
+
     if (!name.trim()) {
       toast.error('يرجى إدخال اسم البطولة الأساسي');
       return;
@@ -140,34 +118,46 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
       // Generate combinations: categories x genders
       const tournamentsBatch: Omit<Tournament, 'id'>[] = [];
 
-      for (const catId of selectedCategories) {
-        const catObj = seasonalCategories.find(c => c.id === catId);
-        const catShortName = catObj ? catObj.shortName : catId;
-        const catFullName = catObj ? catObj.name : catId;
+      if (sportId === 'cross_country') {
+        tournamentsBatch.push({
+          name: name.trim() || 'البطولة الإقليمية المدرسية للعدو الريفي',
+          seasonId: currentSeason,
+          sportId: 'cross_country',
+          ageCategory: 'جميع الفئات العمرية (8 فئات مدمجة)',
+          gender: 'Mixed',
+          level: selectedLevels.join(','),
+          scope,
+          startDate: new Date(startDate),
+          endDate: new Date(endDate),
+          status,
+          description: description.trim() || 'البطولة الإقليمية المدرسية للعدو الريفي بمشاركة جميع الفئات والأجناس الثمانية المعتمدة (U12, U15, U18, U20 ذكور وإناث).'
+        });
+      } else {
+        for (const catId of selectedCategories) {
+          const catObj = seasonalCategories.find(c => c.id === catId);
+          const catShortName = catObj ? catObj.shortName : catId;
+          const catFullName = catObj ? catObj.name : catId;
 
-        for (const gen of gendersToGenerate) {
-          const genderLabel = gen === 'Male' ? 'ذكور' : gen === 'Female' ? 'إناث' : 'مختلط';
-          
-          // Formulate distinct tournament name
-          const finalTournamentName = `${name.trim()} - ${genderLabel} (${catShortName})`;
+          for (const gen of gendersToGenerate) {
+            const genderLabel = gen === 'Male' ? 'ذكور' : gen === 'Female' ? 'إناث' : 'مختلط';
+            
+            // Formulate distinct tournament name
+            const finalTournamentName = `${name.trim()} - ${genderLabel} (${catShortName})`;
 
-          tournamentsBatch.push({
-            name: finalTournamentName,
-            seasonId: currentSeason,
-            sportId,
-            ageCategory: catFullName,
-            gender: gen,
-            level,
-            scope,
-            startDate: new Date(startDate),
-            endDate: new Date(endDate),
-            status,
-            description: description.trim() || 'بطولة مدرسية رسمية بمديرية تاوريرت',
-            managerName: managerName.trim() || undefined,
-            managerPhone: managerPhone.trim() || undefined,
-            managerEmail: managerEmail.trim() || undefined,
-            accessCode: accessCode.trim() || undefined
-          });
+            tournamentsBatch.push({
+              name: finalTournamentName,
+              seasonId: currentSeason,
+              sportId,
+              ageCategory: catFullName,
+              gender: gen,
+              level: selectedLevels.join(','),
+              scope,
+              startDate: new Date(startDate),
+              endDate: new Date(endDate),
+              status,
+              description: description.trim() || 'بطولة مدرسية رسمية بمديرية تاوريرت'
+            });
+          }
         }
       }
 
@@ -177,10 +167,8 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
       // Reset Form fields
       setName('');
       setDescription('');
-      setManagerName('');
-      setManagerPhone('');
-      setManagerEmail('');
       setSelectedCategories(['U15']);
+      setSelectedLevels(['High']);
       setGenderSelection('Both');
       onClose();
     } catch (err) {
@@ -244,31 +232,53 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
                 onChange={(e) => setSportId(e.target.value)}
                 className="w-full text-xs rounded-lg border border-slate-200 px-3 py-2 text-slate-800 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
               >
-                <option value="football">⚽ كرة القدم</option>
-                <option value="futsal">⚽ كرة القدم داخل القاعة (Futsal)</option>
-                <option value="handball">🤾 كرة اليد</option>
-                <option value="volleyball">🏐 الكرة الطائرة</option>
-                <option value="basketball">🏀 كرة السلة</option>
-                <option value="athletics">🏃 ألعاب القوى والعدو الريفي</option>
-                <option value="table_tennis">🏓 كرة الطاولة</option>
-                <option value="badminton">🏸 البادمنتون</option>
-                <option value="chess">♟️ الشطرنج المدرسي</option>
+                {sportsConfig.length > 0
+                  ? sportsConfig.map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.icon || SPORTS_MAP[s.id]?.icon || '🏆'} {s.name}
+                      </option>
+                    ))
+                  : Object.entries(SPORTS_MAP).map(([id, info]) => (
+                      <option key={id} value={id}>
+                        {info.icon} {info.name}
+                      </option>
+                    ))}
               </select>
             </div>
 
             <div>
               <label className="block text-xs font-bold text-slate-700 mb-1">
-                السلك التعليمي
+                الأسلاك التعليمية المعنية * (يمكن تحديد سلك أو أكثر)
               </label>
-              <select
-                value={level}
-                onChange={(e) => setLevel(e.target.value as any)}
-                className="w-full text-xs rounded-lg border border-slate-200 px-3 py-2 text-slate-800 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-              >
-                <option value="High">الثانوي التأهيلي (Lycée)</option>
-                <option value="Middle">الثانوي الإعدادي (Collège)</option>
-                <option value="Primary">التعليم الابتدائي (Primaire)</option>
-              </select>
+              <div className="flex flex-wrap gap-1.5 mt-1">
+                {[
+                  { id: 'Primary', label: 'ابتدائي (Primaire)' },
+                  { id: 'Middle', label: 'إعدادي (Collège)' },
+                  { id: 'High', label: 'تأهيلي (Lycée)' }
+                ].map((item) => {
+                  const isSelected = selectedLevels.includes(item.id as any);
+                  return (
+                    <button
+                      type="button"
+                      key={item.id}
+                      onClick={() => {
+                        setSelectedLevels(prev =>
+                          prev.includes(item.id as any)
+                            ? (prev.length > 1 ? prev.filter(x => x !== item.id) : prev)
+                            : [...prev, item.id as any]
+                        );
+                      }}
+                      className={`px-2.5 py-1.5 rounded-lg text-[11px] font-bold border transition-all cursor-pointer ${
+                        isSelected
+                          ? 'bg-blue-600 border-blue-600 text-white shadow-3xs'
+                          : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+                      }`}
+                    >
+                      {item.label}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
           </div>
 
@@ -422,74 +432,20 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
             </div>
           </div>
 
-          {/* Tournament Manager & Secret PIN (تخصيص المسؤول والقن السري) */}
-          <div className="bg-blue-50/60 border border-blue-100 rounded-xl p-3.5 space-y-3">
+          {/* Technical Committee Authority Banner */}
+          <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200/80 rounded-xl p-3.5 space-y-1.5">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <UserCheck className="h-4 w-4 text-blue-700" />
-                <h4 className="text-xs font-bold text-blue-900">تخصيص مسؤول البطولة والقن السري الموحد للنسخ المولّدة</h4>
+                <ShieldCheck className="h-4 w-4 text-blue-700" />
+                <h4 className="text-xs font-bold text-blue-900">إشراف وضوابط البطولة</h4>
               </div>
-              <span className="text-[10px] bg-blue-100 text-blue-800 font-bold px-2 py-0.5 rounded">
-                صلاحيات الإشراف
+              <span className="text-[10px] bg-blue-100/80 text-blue-800 font-bold px-2 py-0.5 rounded">
+                اللجنة التقنية
               </span>
             </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div>
-                <label className="block text-[11px] font-bold text-slate-700 mb-1">
-                  اسم الأستاذ / المسؤول عن البطولة
-                </label>
-                <input
-                  type="text"
-                  placeholder="مثال: ذ. عبد الرحيم بلقاسم"
-                  value={managerName}
-                  onChange={(e) => setManagerName(e.target.value)}
-                  className="w-full text-xs rounded-lg border border-slate-200 px-3 py-2 text-slate-800 bg-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
-              </div>
-
-              <div>
-                <label className="block text-[11px] font-bold text-slate-700 mb-1">
-                  رقم هاتف المسؤول (للتواصل والإشعار)
-                </label>
-                <input
-                  type="tel"
-                  placeholder="مثال: 0661234567"
-                  value={managerPhone}
-                  onChange={(e) => setManagerPhone(e.target.value)}
-                  className="w-full text-xs rounded-lg border border-slate-200 px-3 py-2 text-slate-800 bg-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
-              </div>
-            </div>
-
-            <div>
-              <div className="flex items-center justify-between mb-1">
-                <label className="block text-[11px] font-bold text-slate-700 flex items-center gap-1.5">
-                  <KeyRound className="h-3.5 w-3.5 text-amber-600" />
-                  <span>القن السري للبطولة (PIN)</span>
-                </label>
-                <button
-                  type="button"
-                  onClick={generateNewCode}
-                  className="text-[10px] text-blue-700 hover:text-blue-900 font-bold flex items-center gap-1 cursor-pointer"
-                >
-                  <RefreshCw className="h-3 w-3" />
-                  <span>توليد قن سري تلقائي</span>
-                </button>
-              </div>
-              <div className="flex items-center gap-2">
-                <input
-                  type="text"
-                  placeholder="مثال: FB-2026 أو 4821"
-                  value={accessCode}
-                  onChange={(e) => setAccessCode(e.target.value)}
-                  className="w-full text-xs font-mono font-bold tracking-wider rounded-lg border border-slate-200 px-3 py-2 text-slate-900 bg-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
-                <span className="text-[10px] text-slate-500 whitespace-nowrap bg-white px-2 py-2 rounded-lg border border-slate-200">
-                  سيستخدم المسؤول نفس القن لإدخال نتائج كل البطولات المولّدة
-                </span>
-              </div>
-            </div>
+            <p className="text-[11px] text-slate-600 leading-relaxed">
+              يتولى رئيس اللجنة التقنية المكلّف بهذا الصنف الرياضي (والمعيّن من طرف المسؤول المركزي) كامل صلاحيات الإشراف والضوابط وإدارة المباريات والنتائج للبطولة.
+            </p>
           </div>
 
           {/* Description */}
