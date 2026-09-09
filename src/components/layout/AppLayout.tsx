@@ -127,10 +127,13 @@ export const AppLayout: React.FC = () => {
   // 6. المباريات والنتائج
   // 7. احصائيات عامة
   // 8. الاعدادات والضوابط
+  const canSendNotifications = isCentralAdmin || isTechCommitteeHead || userProfile?.role === 'SPORT_MANAGER';
+
   const navItems = [
-    { name: 'الرئيسية والإشعارات', href: '/dashboard', icon: LayoutDashboard },
+    { name: canSendNotifications ? 'الرئيسية والإشعارات' : 'الرئيسية', href: '/dashboard', icon: LayoutDashboard },
     { name: 'البطولات الإقليمية', href: '/tournaments', icon: Trophy },
     { name: 'المؤسسات المشاركة', href: '/schools', icon: Users },
+    { name: 'هيئة التدريس (المؤطرون)', href: '/teachers', icon: UserIcon },
     { name: 'تسجيل الفرق والتلاميذ', href: '/teacher-teams', icon: GraduationCap },
     ...(isCentralAdmin || isTechCommitteeHead
       ? [{ name: 'رؤساء اللجن التقنية', href: '/tech-committee', icon: ShieldCheck }]

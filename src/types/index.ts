@@ -32,6 +32,7 @@ export interface Sport {
   studentLimit?: number; // السقف الأقصى لعدد التلاميذ المسموح بمشاركتهم من كل مؤسسة في هذا التخصص
   athleticsSpecialties?: string[]; // تخصصات ألعاب القوى المتاحة (القفز الطولي، القفز العلوي، جري 80 متر...)
   isCustom?: boolean; // رياضة مضافة من طرف المسير المركزي
+  isProgrammed?: boolean; // وضع البطولة: مبرمجة (true) أو في طور الإعداد (false)
   createdAt?: any;
 }
 

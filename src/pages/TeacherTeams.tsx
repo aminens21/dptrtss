@@ -41,14 +41,21 @@ export const TeacherTeams: React.FC = () => {
   const [selectedSportId, setSelectedSportId] = useState<string | null>(urlSport || null);
   const [sportTabFilter, setSportTabFilter] = useState<'PROGRAMMED' | 'NON_PROGRAMMED' | 'ALL'>('PROGRAMMED');
 
+  const isSportProgrammed = (s: Sport): boolean => {
+    if (s.isProgrammed !== undefined) return s.isProgrammed;
+    if (s.id === 'cross_country') return true;
+    if (tournaments.some(t => t.sportId === s.id)) return true;
+    return (s.ageCategories && s.ageCategories.length > 0 && s.studentLimit !== undefined && s.studentLimit > 0) || false;
+  };
+
   // Classified Sports
   const programmedSports = useMemo(() => {
-    return sportsConfig.filter(s => tournaments.some(t => t.sportId === s.id));
-  }, [sportsConfig, tournaments]);
+    return sportsConfig.filter(s => isSportProgrammed(s));
+  }, [sportsConfig]);
 
   const nonProgrammedSports = useMemo(() => {
-    return sportsConfig.filter(s => !tournaments.some(t => t.sportId === s.id));
-  }, [sportsConfig, tournaments]);
+    return sportsConfig.filter(s => !isSportProgrammed(s));
+  }, [sportsConfig]);
 
   // New Student Form State
   const [isFormOpen, setIsFormOpen] = useState(false);
@@ -212,9 +219,10 @@ export const TeacherTeams: React.FC = () => {
   const handleOpenNewStudentForm = () => {
     if (!selectedSportId) return;
 
-    if (!hasActiveTournament(selectedSportId)) {
-      const sportName = SPORTS_MAP[selectedSportId]?.name || selectedSportId;
-      toast.error(`لا يمكنك تسجيل التلاميذ لعدم وجود بطولة إقليمية مبرمجة حالياً لـ (${sportName}). يجب إنشاء وبرمجة البطولة أولاً من طرف الإدارة الإقليمية.`);
+    const selectedSportObj = sportsConfig.find(s => s.id === selectedSportId);
+    if (!selectedSportObj || !isSportProgrammed(selectedSportObj)) {
+      const sportName = SPORTS_MAP[selectedSportId]?.name || selectedSportObj?.name || selectedSportId;
+      toast.error(`البطولة الخاصة بـ (${sportName}) في طور الإعداد والتجهيز حالياً وغير مفتوحة للتسجيل. لا يمكن إضافة التلاميذ إلا بعد تفعيل البرمجة رسمياً من طرف الإدارة واللجنة التقنية.`);
       return;
     }
 
@@ -292,9 +300,10 @@ export const TeacherTeams: React.FC = () => {
 
     if (!selectedSportId) return;
 
-    if (!hasActiveTournament(selectedSportId)) {
+    const activeSportConfig = sportsConfig.find(s => s.id === selectedSportId);
+    if (!activeSportConfig || !isSportProgrammed(activeSportConfig)) {
       const sportName = SPORTS_MAP[selectedSportId]?.name || selectedSportId;
-      toast.error(`خطأ في التسجيل: لا توجد بطولة إقليمية مبرمجة لـ (${sportName}). لا يمكن تسجيل التلاميذ إلا بعد برمجة البطولة رسمياً.`);
+      toast.error(`خطأ في التسجيل: البطولة الخاصة بـ (${sportName}) في طور الإعداد حالياً وغير مفتوحة للتسجيل.`);
       return;
     }
 
@@ -317,7 +326,6 @@ export const TeacherTeams: React.FC = () => {
     }
 
     // 1. General Limit Checked
-    const activeSportConfig = sportsConfig.find(s => s.id === selectedSportId);
     if (activeSportConfig?.studentLimit && activeSportConfig.studentLimit > 0) {
       const activeCount = editingStudentId 
         ? activeSportStudents.filter(s => s.id !== editingStudentId).length
@@ -501,8 +509,7 @@ export const TeacherTeams: React.FC = () => {
     const mapped = SPORTS_MAP[sport.id] || { name: sport.name, icon: '🏆' };
     const count = students.filter(s => s.sportId === sport.id).length;
     const hasConfiguredCategories = sport.ageCategories && sport.ageCategories.length > 0;
-    const tourn = getSportTournament(sport.id);
-    const isProgrammed = !!tourn;
+    const isProgrammed = isSportProgrammed(sport);
 
     return (
       <div
@@ -667,8 +674,8 @@ export const TeacherTeams: React.FC = () => {
               </span>
               <button
                 onClick={handleOpenNewStudentForm}
-                disabled={!activeSportCategories || activeSportCategories.length === 0 || !hasActiveTournament(selectedSportId)}
-                title={!hasActiveTournament(selectedSportId) ? 'لا توجد بطولة إقليمية مبرمجة بعد لهذه الرياضة' : 'إضافة تلميذ جديد'}
+                disabled={!activeSportCategories || activeSportCategories.length === 0 || !activeSportConfig || !isSportProgrammed(activeSportConfig)}
+                title={activeSportConfig && !isSportProgrammed(activeSportConfig) ? 'هذه البطولة في طور الإعداد وغير مفتوحة للتسجيل' : 'إضافة تلميذ جديد'}
                 className="bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs px-4 py-2 rounded-xl shadow-xs flex items-center gap-1.5 transition-colors disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
               >
                 <Plus className="h-4 w-4" />
@@ -677,14 +684,14 @@ export const TeacherTeams: React.FC = () => {
             </div>
           </div>
 
-          {/* Alert if no active tournament exists */}
-          {!hasActiveTournament(selectedSportId) && (
-            <div className="p-4 bg-amber-50 border border-amber-200 rounded-2xl flex items-start gap-3 text-amber-900 text-xs leading-relaxed shadow-xs">
+          {/* Alert if sport is in draft / not programmed */}
+          {activeSportConfig && !isSportProgrammed(activeSportConfig) && (
+            <div className="p-4 bg-amber-50 border border-amber-200/90 rounded-2xl flex items-start gap-3 text-amber-950 text-xs leading-relaxed shadow-3xs">
               <AlertCircle className="h-5 w-5 shrink-0 text-amber-600 mt-0.5" />
               <div>
-                <p className="font-extrabold text-sm">⚠️ تنبيه تنظيماتي: لا توجد بطولة إقليمية مبرمجة لـ ({getSportName(selectedSportId)})!</p>
-                <p className="mt-1 text-slate-700 font-medium">
-                  وفق القوانين المنظمة للفرع الإقليمي، يتم تسجيل التلاميذ بالبطولة الإقليمية للرياضة المعنية حصراً، ولا يمكن تسجيل تلميذ إذا لم تكن البطولة الإقليمية موجودة أو مبرمجة رسمياً.
+                <p className="font-extrabold text-sm text-amber-950">⚠️ البطولة في طور الإعداد والتجهيز حالياً لـ ({getSportName(selectedSportId)})!</p>
+                <p className="mt-1 text-amber-900 font-medium">
+                  هذه الرياضة في مرحلة الإعداد ولم تُفعل للتسجيل بعد من طرف المسير المركزي أو رئيس اللجنة التقنية المكلّف. ستتمكن من تسجيل وتأطير لائحة فرق مؤسستك فور تفعيل وضعية البرمجة (🟢) لهذه الرياضة.
                 </p>
               </div>
             </div>

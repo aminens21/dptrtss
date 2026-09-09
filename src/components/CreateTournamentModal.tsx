@@ -8,6 +8,7 @@ interface CreateTournamentModalProps {
   isOpen: boolean;
   onClose: () => void;
   allowedSportIds?: string[] | null;
+  preselectedSportId?: string;
   onCreated: (tournaments: Omit<Tournament, 'id'>[]) => Promise<void>;
 }
 
@@ -15,6 +16,7 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
   isOpen,
   onClose,
   allowedSportIds,
+  preselectedSportId,
   onCreated
 }) => {
   const [name, setName] = useState('');
@@ -55,15 +57,17 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
     return sportsConfig.filter(s => allowedSportIds.includes(s.id));
   }, [sportsConfig, allowedSportIds]);
 
-  // Auto-set sportId to the first allowed sport when available sports change
+  // Auto-set sportId to preselectedSportId or first allowed sport
   useEffect(() => {
-    if (availableSports.length > 0) {
+    if (preselectedSportId) {
+      setSportId(preselectedSportId);
+    } else if (availableSports.length > 0) {
       const isCurrentValid = availableSports.some(s => s.id === sportId);
       if (!isCurrentValid) {
         setSportId(availableSports[0].id);
       }
     }
-  }, [availableSports]);
+  }, [availableSports, preselectedSportId]);
 
   const seasonalCategories = getAgeCategoriesForSeason(currentSeason);
   const activeSportConfig = sportsConfig.find(s => s.id === sportId);

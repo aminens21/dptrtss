@@ -1111,7 +1111,8 @@ export const DataService = {
     studentLimit?: number,
     athleticsSpecialties?: string[],
     name?: string,
-    icon?: string
+    icon?: string,
+    isProgrammed?: boolean
   ): Promise<void> {
     const list = await this.getSportsConfig();
     const updated = list.map(s => {
@@ -1122,7 +1123,8 @@ export const DataService = {
         studentLimit,
         athleticsSpecialties,
         name: name || s.name,
-        icon: icon || s.icon
+        icon: icon || s.icon,
+        isProgrammed: isProgrammed !== undefined ? isProgrammed : s.isProgrammed
       };
     });
     setLocal('taourirt_sports_config', updated);
@@ -1139,6 +1141,7 @@ export const DataService = {
         ageCategories,
         studentLimit: studentLimit !== undefined ? studentLimit : null,
         athleticsSpecialties: athleticsSpecialties !== undefined ? athleticsSpecialties : null,
+        ...(isProgrammed !== undefined ? { isProgrammed } : {}),
         ...(name ? { name } : {}),
         ...(icon ? { icon } : {}),
         updatedAt: serverTimestamp()
