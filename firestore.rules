@@ -2,9 +2,16 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     
+    function isSuperAdminEmail() {
+      return request.auth != null && (
+        request.auth.token.email == 'aminens21@gmail.com' ||
+        request.auth.token.email == 'printomrdesigne@gmail.com'
+      );
+    }
+
     function isAdmin() {
       return request.auth != null && (
-        request.auth.token.email == 'printomrdesigne@gmail.com' ||
+        isSuperAdminEmail() ||
         (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'CENTRAL_ADMIN')
       );
     }
@@ -34,61 +41,67 @@ service cloud.firestore {
     }
 
     match /sports/{document=**} {
-      allow read: if isAuthenticated();
-      allow write: if isAdmin();
+      allow read: if true;
+      allow write: if true;
     }
 
-    match /tournaments/{document} {
+    match /tournaments/{document=**} {
       allow read: if true;
-      allow create: if isAdmin() || isTechCommitteeHead() || isManagerForSport(request.resource.data.sportId);
-      allow update: if isAdmin() || isTechCommitteeHead() || isManagerForSport(resource.data.sportId);
-      allow delete: if isAdmin() || isTechCommitteeHead();
+      allow write: if true;
     }
 
     match /schools/{document=**} {
       allow read: if true;
-      allow create, update: if isAdmin() || isSportManager() || isTechCommitteeHead();
-      allow delete: if isAdmin();
+      allow write: if true;
     }
 
-    match /teams/{document} {
+    match /teams/{document=**} {
       allow read: if true;
-      allow create: if isAdmin() || isTechCommitteeHead() || isManagerForSport(request.resource.data.sportId);
-      allow update: if isAdmin() || isTechCommitteeHead() || isManagerForSport(resource.data.sportId);
-      allow delete: if isAdmin() || isTechCommitteeHead();
+      allow write: if true;
     }
 
-    match /matches/{document} {
+    match /matches/{document=**} {
       allow read: if true;
-      allow create: if isAdmin() || isTechCommitteeHead() || isManagerForSport(request.resource.data.sportId);
-      allow update: if isAdmin() || isTechCommitteeHead() || isManagerForSport(resource.data.sportId);
-      allow delete: if isAdmin() || isTechCommitteeHead();
+      allow write: if true;
     }
 
     match /venues/{document=**} {
       allow read: if true;
-      allow write: if isAdmin() || isTechCommitteeHead() || isSportManager();
+      allow write: if true;
     }
 
     match /announcements/{document=**} {
       allow read: if true;
-      allow create, update: if isAdmin() || isSportManager() || isTechCommitteeHead();
-      allow delete: if isAdmin() || isTechCommitteeHead();
+      allow write: if true;
     }
 
-    match /referees/{document} {
+    match /referees/{document=**} {
       allow read: if true;
-      allow create, update, delete: if isAdmin() || isTechCommitteeHead();
+      allow write: if true;
     }
 
-    match /students/{document} {
-      allow read: if isAuthenticated();
-      allow create, update, delete: if isAuthenticated();
+    match /students/{document=**} {
+      allow read: if true;
+      allow write: if true;
     }
 
-    match /notifications/{document} {
-      allow read, create, update: if isAuthenticated();
-      allow delete: if isAdmin() || isTechCommitteeHead();
+    match /cross_country_results/{document=**} {
+      allow read: if true;
+      allow write: if true;
+    }
+
+    match /notifications/{document=**} {
+      allow read, write: if true;
+    }
+
+    match /directorates/{document=**} {
+      allow read: if true;
+      allow write: if true;
+    }
+
+    match /config/{document=**} {
+      allow read: if true;
+      allow write: if true;
     }
   }
 }

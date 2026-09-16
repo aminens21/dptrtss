@@ -12,6 +12,7 @@ interface CreateMatchModalProps {
   tournaments?: Tournament[];
   matches?: Match[];
   managerSportId?: string; // If set, user is restricted to this sport only
+  initialTournamentId?: string; // Pre-select a tournament if opened from inside it
   onSave: (match: Omit<Match, 'id'>, matchId?: string) => Promise<void>;
   editingMatch?: Match | null;
 }
@@ -24,6 +25,7 @@ export const CreateMatchModal: React.FC<CreateMatchModalProps> = ({
   tournaments = [],
   matches = [],
   managerSportId,
+  initialTournamentId,
   onSave,
   editingMatch
 }) => {
@@ -138,7 +140,13 @@ export const CreateMatchModal: React.FC<CreateMatchModalProps> = ({
       
       setStatus(editingMatch.status);
     } else {
-      if (managerSportId) {
+      if (initialTournamentId && availableTournaments.some(t => t.id === initialTournamentId)) {
+        const target = availableTournaments.find(t => t.id === initialTournamentId)!;
+        setTournamentId(target.id);
+        if (target.sportId) setSportId(target.sportId);
+        if (target.ageCategory) setAgeCategory(target.ageCategory);
+        if (target.gender) setGender(target.gender);
+      } else if (managerSportId) {
         setSportId(managerSportId);
         if (availableTournaments.length > 0 && !availableTournaments.some(t => t.id === tournamentId)) {
           const first = availableTournaments[0];
@@ -154,7 +162,7 @@ export const CreateMatchModal: React.FC<CreateMatchModalProps> = ({
         if (first.gender) setGender(first.gender);
       }
     }
-  }, [managerSportId, availableTournaments, isOpen, editingMatch]);
+  }, [managerSportId, availableTournaments, isOpen, editingMatch, initialTournamentId]);
 
   // Check for Venue Conflict on the chosen Date & Time (1 hour difference)
   const selectedVenue = useMemo(() => venues.find(v => v.id === venueId), [venues, venueId]);

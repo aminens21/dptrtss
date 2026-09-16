@@ -23,6 +23,7 @@ import {
 import { CreateTournamentModal } from '../components/CreateTournamentModal';
 import { DailyWhatsAppNotificationCenter } from '../components/DailyWhatsAppNotificationCenter';
 import { PWAInstallButton } from '../components/PWAInstallButton';
+import { AppLogo } from '../components/AppLogo';
 import toast from 'react-hot-toast';
 
 export const Dashboard: React.FC = () => {
@@ -46,15 +47,31 @@ export const Dashboard: React.FC = () => {
   const [isTournamentModalOpen, setIsTournamentModalOpen] = useState(false);
 
   const isCentralAdmin = userProfile?.role === 'CENTRAL_ADMIN';
+  const isRegionalManager = (userProfile?.role as any) === 'REGIONAL_MANAGER';
   const isSportManager = userProfile?.role === 'SPORT_MANAGER';
+  const isTechCommitteeHead = userProfile?.isTechCommitteeHead === true;
   const isTeacher = userProfile?.role === 'TEACHER';
+  const isReferee = userProfile?.role === 'REFEREE';
+
+  // Only Central Admin, Regional Manager, Sport Manager, and Technical Committee Heads can view the WhatsApp Notification Center.
+  // Ordinary teachers and referees will not see this window at all; they receive notifications via the bell.
+  const canAccessWhatsAppNotificationCenter =
+    isCentralAdmin || isRegionalManager || isSportManager || isTechCommitteeHead;
 
   useEffect(() => {
     loadDashboardData();
+    const handleDirChange = () => {
+      loadDashboardData();
+    };
+    window.addEventListener('directorateChanged', handleDirChange);
+    return () => {
+      window.removeEventListener('directorateChanged', handleDirChange);
+    };
   }, []);
 
   const loadDashboardData = async () => {
     try {
+      const activeDirId = DataService.getActiveDirectorateId();
       const [tList, mList, sList, vList, rList, uList] = await Promise.all([
         DataService.getTournaments(),
         DataService.getMatches(),
@@ -64,22 +81,30 @@ export const Dashboard: React.FC = () => {
         DataService.getUsers()
       ]);
 
-      const completed = mList.filter(m => m.status === 'Completed').length;
+      const dirMatches = mList.filter(m => (m.directorateId || 'taourirt') === activeDirId);
+      const dirSchools = sList.filter(s => (s.directorateId || 'taourirt') === activeDirId);
+      const dirVenues = vList.filter(v => (v.directorateId || 'taourirt') === activeDirId);
+      const dirReferees = rList.filter(r => (r.directorateId || 'taourirt') === activeDirId);
+      const dirTeachers = uList.filter(u => (u.directorateId || 'taourirt') === activeDirId);
 
-      setTournaments(tList);
-      setMatches(mList);
-      setSchools(deduplicateById<School>(sList));
-      setVenues(vList);
-      setReferees(rList);
-      setTeachers(uList);
+      const completed = dirMatches.filter(m => m.status === 'Completed').length;
+
+      const dirTournaments = tList.filter(t => (t.directorateId || 'taourirt') === activeDirId);
+
+      setTournaments(dirTournaments);
+      setMatches(dirMatches);
+      setSchools(deduplicateById<School>(dirSchools));
+      setVenues(dirVenues);
+      setReferees(dirReferees);
+      setTeachers(dirTeachers);
 
       setStats({
-        tournaments: tList.length,
-        matches: mList.length,
-        schools: sList.length,
+        tournaments: dirTournaments.length,
+        matches: dirMatches.length,
+        schools: dirSchools.length,
         completedMatches: completed
       });
-      setRecentMatches(mList.slice(0, 5));
+      setRecentMatches(dirMatches.slice(0, 5));
 
       if (userProfile?.role === 'TEACHER') {
         const tMatches = mList.filter(m => 
@@ -103,10 +128,17 @@ export const Dashboard: React.FC = () => {
     }
   };
 
-  const handleCreateTournament = async (newTourn: Omit<Tournament, 'id'>) => {
+  const handleCreateTournament = async (newTourns: Omit<Tournament, 'id'> | Omit<Tournament, 'id'>[]) => {
     try {
-      await DataService.addTournament(newTourn);
-      toast.success('تمت إضافة وبرمجة البطولة بنجاح!');
+      const items = Array.isArray(newTourns) ? newTourns : [newTourns];
+      for (const item of items) {
+        await DataService.addTournament(item);
+      }
+      if (items.length > 1) {
+        toast.success(`تم إنشاء وبرمجة ${items.length} بطولات بنجاح!`);
+      } else {
+        toast.success('تمت إضافة وبرمجة البطولة بنجاح!');
+      }
       loadDashboardData();
     } catch (e) {
       toast.error('حدث خطأ أثناء إنشاء البطولة');
@@ -116,24 +148,27 @@ export const Dashboard: React.FC = () => {
   return (
     <div className="space-y-6" dir="rtl">
       {/* Welcome Banner */}
-      <div className="bg-gradient-to-r from-slate-900 to-slate-800 rounded-2xl p-5 md:p-6 text-white shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <div className="flex items-center gap-2 mb-1.5">
-            <span className="bg-blue-600 text-white text-[10px] font-extrabold px-2 py-0.5 rounded uppercase">
-              {isTeacher ? 'فضاء أستاذ التربية البدنية' : isSportManager ? 'فضاء مسؤول النشاط الرياضي' : 'لوحة الإدارة الإقليمية'}
-            </span>
-            <span className="text-slate-400 text-xs font-medium">| مديرية تاوريرت</span>
+      <div className="bg-gradient-to-r from-slate-900 via-slate-850 to-slate-900 rounded-2xl p-4 sm:p-5 md:p-6 text-white shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4 border border-slate-800 relative overflow-hidden">
+        <div className="flex items-start gap-3.5 min-w-0">
+          <AppLogo size={56} className="shrink-0 drop-shadow-md" />
+          <div className="min-w-0">
+            <div className="flex items-center gap-2 mb-1.5 flex-wrap">
+              <span className="bg-blue-600 text-white text-[10px] font-extrabold px-2 py-0.5 rounded uppercase">
+                {isTeacher ? 'فضاء أستاذ التربية البدنية' : isSportManager ? 'فضاء مسؤول النشاط الرياضي' : 'لوحة الإدارة الإقليمية'}
+              </span>
+              <span className="text-slate-400 text-xs font-medium">| الفرع الإقليمي للرياضة المدرسية</span>
+            </div>
+            <h2 className="text-base sm:text-lg md:text-xl font-bold text-white">
+              مرحباً بك، {userProfile?.fullName || (isTeacher ? 'الأستاذ' : isSportManager ? 'مسؤول النشاط' : 'المسير المركزي')} 👋
+            </h2>
+            <p className="text-xs text-slate-300 mt-1 max-w-xl leading-relaxed">
+              {isTeacher
+                ? 'متابعة فورية للمقابلات المبرمجة، ملاعب وقاعات التباري، وجداول النتائج الرسمية المحينة أولاً بأول.'
+                : isSportManager
+                ? 'برمجة وإدارة مباريات البطولة، إضافة وتعديل المؤسسات والفرق المشاركة، وإدارة مراكز التباري.'
+                : 'متابعة فورية للأنشطة والبطولات الرياضية المدرسية، تعيين لجان التحكيم، وبرمجة الإقصائيات الإقليمية.'}
+            </p>
           </div>
-          <h2 className="text-lg md:text-xl font-bold text-white">
-            مرحباً بك، {userProfile?.fullName || (isTeacher ? 'الأستاذ' : isSportManager ? 'مسؤول النشاط' : 'المسير المركزي')} 👋
-          </h2>
-          <p className="text-xs text-slate-300 mt-1 max-w-xl">
-            {isTeacher
-              ? 'متابعة فورية للمقابلات المبرمجة، ملاعب وقاعات التباري، وجداول النتائج الرسمية المحينة أولاً بأول.'
-              : isSportManager
-              ? 'برمجة وإدارة مباريات البطولة، إضافة وتعديل المؤسسات والفرق المشاركة، وإدارة مراكز التباري.'
-              : 'متابعة فورية للأنشطة والبطولات الرياضية المدرسية، تعيين لجان التحكيم، وبرمجة الإقصائيات الإقليمية.'}
-          </p>
         </div>
 
         <div className="flex items-center gap-2 self-start sm:self-auto flex-wrap">
@@ -176,6 +211,30 @@ export const Dashboard: React.FC = () => {
 
       {/* PWA Mobile App Installation Banner */}
       <PWAInstallButton variant="banner" />
+
+      {/* Teacher Profile Incomplete Banner (Gentle Non-blocking notice) */}
+      {isTeacher && (!userProfile?.workLocation || !userProfile?.leaseNumber) && (
+        <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 text-amber-900 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-xs">
+          <div className="flex items-center gap-3">
+            <div className="p-2 bg-amber-100 text-amber-700 rounded-xl shrink-0">
+              <AlertCircle className="w-5 h-5" />
+            </div>
+            <div>
+              <h4 className="text-xs font-black text-amber-950">بيانات الأستاذ(ة) والمؤسسة غير مكتملة</h4>
+              <p className="text-[11px] text-amber-800 mt-0.5">
+                يرجى استكمال مقر العمل ورقم التأجير لتسهيل التواصل والتعيين في لجان التحكيم.
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={openProfileModal}
+            className="bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold px-4 py-2 rounded-xl transition-all shadow-xs cursor-pointer shrink-0 text-center"
+          >
+            استكمال الملف الشخصي ✍️
+          </button>
+        </div>
+      )}
 
       {/* High Density 4-Column Stat Cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
@@ -244,16 +303,18 @@ export const Dashboard: React.FC = () => {
         </div>
       </div>
 
-      {/* WhatsApp Daily Notification Center (Primary Section) */}
-      <DailyWhatsAppNotificationCenter
-        matches={matches}
-        schools={schools}
-        tournaments={tournaments}
-        venues={venues}
-        referees={referees}
-        teachers={teachers}
-        onRefresh={loadDashboardData}
-      />
+      {/* WhatsApp Daily Notification Center (Primary Section - Only for Authorized Supervisors & Tech Committee Heads) */}
+      {canAccessWhatsAppNotificationCenter && (
+        <DailyWhatsAppNotificationCenter
+          matches={matches}
+          schools={schools}
+          tournaments={tournaments}
+          venues={venues}
+          referees={referees}
+          teachers={teachers}
+          onRefresh={loadDashboardData}
+        />
+      )}
 
       {/* Main Content Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -400,15 +461,17 @@ export const Dashboard: React.FC = () => {
             </div>
           </div>
 
-          <div className="bg-gradient-to-br from-emerald-50 to-teal-50/50 p-4 rounded-xl border border-emerald-100 text-slate-700 text-xs">
-            <h5 className="font-bold text-emerald-900 mb-1 flex items-center gap-1.5">
-              <MessageSquare className="w-3.5 h-3.5 text-emerald-600" />
-              <span>تذكير الواتساب التلقائي</span>
-            </h5>
-            <p className="text-[11px] text-emerald-800/90 leading-relaxed">
-              يمكنك بضغطة زر واحدة إرسال تفاصيل المباراة وموعد الحضور مباشرة إلى واتساب الحكام والمؤطرين ومدراء المؤسسات.
-            </p>
-          </div>
+          {canAccessWhatsAppNotificationCenter && (
+            <div className="bg-gradient-to-br from-emerald-50 to-teal-50/50 p-4 rounded-xl border border-emerald-100 text-slate-700 text-xs">
+              <h5 className="font-bold text-emerald-900 mb-1 flex items-center gap-1.5">
+                <MessageSquare className="w-3.5 h-3.5 text-emerald-600" />
+                <span>تذكير الواتساب التلقائي</span>
+              </h5>
+              <p className="text-[11px] text-emerald-800/90 leading-relaxed">
+                يمكنك بضغطة زر واحدة إرسال تفاصيل المباراة وموعد الحضور مباشرة إلى واتساب الحكام والمؤطرين ومدراء المؤسسات.
+              </p>
+            </div>
+          )}
         </div>
       </div>
 

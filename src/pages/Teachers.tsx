@@ -1,7 +1,11 @@
 import React, { useEffect, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { DataService, SPORTS_MAP } from '../lib/dataService';
-import { User, Student } from '../types';
+import { User, Student, School } from '../types';
 import { TeacherDetailModal } from '../components/TeacherDetailModal';
+import { EditTeacherRoleModal } from '../components/EditTeacherRoleModal';
+import { ConfirmDeleteModal } from '../components/ConfirmDeleteModal';
+import { useAuth } from '../contexts/AuthContext';
 import {
   GraduationCap,
   Search,
@@ -17,36 +21,72 @@ import {
   UserCheck,
   AlertCircle,
   Eye,
-  Info
+  Info,
+  Pencil,
+  Trash2,
+  AlertTriangle
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 export const Teachers: React.FC = () => {
+  const { userProfile } = useAuth();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const cadreQuery = searchParams.get('cadre');
+
   const [teachers, setTeachers] = useState<User[]>([]);
   const [students, setStudents] = useState<Student[]>([]);
+  const [schools, setSchools] = useState<School[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedSport, setSelectedSport] = useState('');
   const [selectedLocation, setSelectedLocation] = useState('');
+  const [selectedCadre, setSelectedCadre] = useState<string>(cadreQuery || '');
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
   // Detail Modal State
   const [selectedTeacherModal, setSelectedTeacherModal] = useState<User | null>(null);
   const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
 
+  // Edit Role/Cadre Modal State
+  const [selectedTeacherForEdit, setSelectedTeacherForEdit] = useState<User | null>(null);
+  const [isEditRoleModalOpen, setIsEditRoleModalOpen] = useState(false);
+
+  // Deletion Modal State
+  const [teacherToDelete, setTeacherToDelete] = useState<User | null>(null);
+  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  useEffect(() => {
+    setSelectedCadre(cadreQuery || '');
+  }, [cadreQuery]);
+
   useEffect(() => {
     loadTeachersAndStudents();
+    const handleDirChange = () => {
+      loadTeachersAndStudents();
+    };
+    window.addEventListener('directorateChanged', handleDirChange);
+    return () => {
+      window.removeEventListener('directorateChanged', handleDirChange);
+    };
   }, []);
 
   const loadTeachersAndStudents = async () => {
     setLoading(true);
     try {
-      const [teachersData, studentsData] = await Promise.all([
+      const activeDirId = DataService.getActiveDirectorateId();
+      const [teachersData, studentsData, schoolsData] = await Promise.all([
         DataService.getTeachers(),
-        DataService.getStudents()
+        DataService.getStudents(),
+        DataService.getSchools()
       ]);
-      setTeachers(teachersData);
-      setStudents(studentsData);
+      const dirTeachers = teachersData.filter(t => (t.directorateId || 'taourirt') === activeDirId);
+      const dirStudents = studentsData.filter(st => (st.directorateId || 'taourirt') === activeDirId);
+      const dirSchools = schoolsData.filter(sch => (sch.directorateId || 'taourirt') === activeDirId);
+
+      setTeachers(dirTeachers);
+      setStudents(dirStudents);
+      setSchools(dirSchools);
     } catch (error) {
       console.error('Error loading teachers:', error);
       toast.error('حدث خطأ أثناء تحميل قائمة الأساتذة');
@@ -68,6 +108,49 @@ export const Teachers: React.FC = () => {
     setIsDetailModalOpen(true);
   };
 
+  const handleOpenEditRole = (teacher: User) => {
+    setSelectedTeacherForEdit(teacher);
+    setIsEditRoleModalOpen(true);
+  };
+
+  const handleTeacherUpdated = (updatedTeacher: User) => {
+    setTeachers(prev => prev.map(t => t.id === updatedTeacher.id ? updatedTeacher : t));
+    if (selectedTeacherModal && selectedTeacherModal.id === updatedTeacher.id) {
+      setSelectedTeacherModal(updatedTeacher);
+    }
+  };
+
+  const handleTeacherDeleted = (deletedTeacherId: string) => {
+    setTeachers(prev => prev.filter(t => t.id !== deletedTeacherId));
+    if (selectedTeacherModal && selectedTeacherModal.id === deletedTeacherId) {
+      setSelectedTeacherModal(null);
+      setIsDetailModalOpen(false);
+    }
+  };
+
+  const handleDeleteClick = (e: React.MouseEvent, teacher: User) => {
+    e.stopPropagation();
+    setTeacherToDelete(teacher);
+    setIsDeleteModalOpen(true);
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!teacherToDelete) return;
+    setIsDeleting(true);
+    try {
+      await DataService.deleteUser(teacherToDelete.id);
+      toast.success(`تم حذف حساب الأستاذ ${teacherToDelete.fullName} بنجاح!`);
+      setTeachers(prev => prev.filter(t => t.id !== teacherToDelete.id));
+      setIsDeleteModalOpen(false);
+      setTeacherToDelete(null);
+    } catch (error) {
+      console.error("Error deleting teacher:", error);
+      toast.error("حدث خطأ أثناء محاولة حذف الحساب");
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
   // Get unique work locations for filter dropdown
   const uniqueLocations = Array.from(
     new Set(teachers.map((t) => t.workLocation).filter(Boolean))
@@ -83,8 +166,9 @@ export const Teachers: React.FC = () => {
 
     const matchesSport = selectedSport === '' || (Array.isArray(teacher.refereeSpecialty) ? teacher.refereeSpecialty.includes(selectedSport) : teacher.refereeSpecialty === selectedSport);
     const matchesLocation = selectedLocation === '' || teacher.workLocation === selectedLocation;
+    const matchesCadre = selectedCadre === '' || (teacher.teachingCadre || 'HIGH') === selectedCadre;
 
-    return matchesSearch && matchesSport && matchesLocation;
+    return matchesSearch && matchesSport && matchesLocation && matchesCadre;
   });
 
   // Calculate statistics
@@ -97,6 +181,18 @@ export const Teachers: React.FC = () => {
     ? students.filter(s => s.schoolName === selectedTeacherModal.workLocation)
     : [];
 
+  const getCadreBadge = (cadre?: string) => {
+    switch (cadre) {
+      case 'PRIMARY':
+        return { text: 'أستاذ الابتدائي', bg: 'bg-emerald-50 text-emerald-700 border-emerald-200' };
+      case 'MIDDLE':
+        return { text: 'أستاذ الإعدادي', bg: 'bg-indigo-50 text-indigo-700 border-indigo-200' };
+      case 'HIGH':
+      default:
+        return { text: 'أستاذ التأهيلي', bg: 'bg-purple-50 text-purple-700 border-purple-200' };
+    }
+  };
+
   return (
     <div className="space-y-6" dir="rtl">
       {/* Header and Quick Stats */}
@@ -104,7 +200,7 @@ export const Teachers: React.FC = () => {
         <div>
           <h2 className="text-xl font-bold text-slate-800 flex items-center gap-2">
             <GraduationCap className="h-6 w-6 text-blue-600" />
-            <span>لائحة هيئة التدريس (الأساتذة والمؤطرون)</span>
+            <span>لائحة الأطر التربوية</span>
           </h2>
           <p className="text-xs text-slate-500 mt-1">
             إدارة ومتابعة ملفات أساتذة التربية البدنية والرياضية المسجلين بالمديرية. اضغط على أي أستاذ لعرض بطاقته التفصيلية.
@@ -169,6 +265,25 @@ export const Teachers: React.FC = () => {
 
         <div className="flex flex-wrap sm:flex-nowrap items-center gap-2.5 w-full md:w-auto">
           <Filter className="h-4 w-4 text-slate-400 shrink-0 hidden sm:block" />
+
+          {/* Teaching Cadre Filter */}
+          <select
+            className="w-full sm:w-44 text-xs px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all font-semibold cursor-pointer"
+            value={selectedCadre}
+            onChange={(e) => {
+              setSelectedCadre(e.target.value);
+              if (e.target.value) {
+                setSearchParams({ cadre: e.target.value });
+              } else {
+                setSearchParams({});
+              }
+            }}
+          >
+            <option value="">جميع الأسلاك والأطر</option>
+            <option value="PRIMARY">🏫 أستاذ التعليم الابتدائي</option>
+            <option value="MIDDLE">📘 أستاذ الثانوي الإعدادي</option>
+            <option value="HIGH">🎓 أستاذ الثانوي التأهيلي</option>
+          </select>
           
           {/* Work Location Filter */}
           <select
@@ -198,12 +313,14 @@ export const Teachers: React.FC = () => {
             ))}
           </select>
 
-          {(searchTerm || selectedSport || selectedLocation) && (
+          {(searchTerm || selectedSport || selectedLocation || selectedCadre) && (
             <button
               onClick={() => {
                 setSearchTerm('');
                 setSelectedSport('');
                 setSelectedLocation('');
+                setSelectedCadre('');
+                setSearchParams({});
               }}
               className="text-xs font-bold text-red-600 hover:text-red-700 bg-red-50 hover:bg-red-100 px-3 py-2.5 rounded-xl transition-colors shrink-0 cursor-pointer"
             >
@@ -265,11 +382,19 @@ export const Teachers: React.FC = () => {
                             )}
                           </div>
                           <div>
-                            <p className="font-bold text-slate-800 group-hover:text-blue-700 transition-colors flex items-center gap-1.5">
+                            <p className="font-bold text-slate-800 group-hover:text-blue-700 transition-colors flex items-center gap-1.5 flex-wrap">
                               <span>{teacher.fullName}</span>
+                              <span className={`text-[9px] font-bold px-1.5 py-0.2 rounded border ${getCadreBadge(teacher.teachingCadre).bg}`}>
+                                {getCadreBadge(teacher.teachingCadre).text}
+                              </span>
                               {teacher.isTechCommitteeHead && (
                                 <span className="text-[9px] bg-blue-100 text-blue-800 font-black px-1.5 py-0.2 rounded border border-blue-200">
                                   رئيس لجنة
+                                </span>
+                              )}
+                              {teacher.isTechCommitteeMember && (
+                                <span className="text-[9px] bg-indigo-100 text-indigo-800 font-black px-1.5 py-0.2 rounded border border-indigo-200">
+                                  عضو لجنة
                                 </span>
                               )}
                             </p>
@@ -314,20 +439,57 @@ export const Teachers: React.FC = () => {
 
                       {/* Referee Specialty */}
                       <td className="px-6 py-4">
-                        <div className="flex flex-wrap gap-1">
-                          {specialties.length > 0 ? (
-                            specialties.map(spec => {
-                              const sportDetails = SPORTS_MAP[spec];
-                              if (!sportDetails) return null;
-                              return (
-                                <span key={spec} className="inline-flex items-center gap-1 px-2.5 py-1 bg-blue-50 text-blue-700 border border-blue-100 rounded-md font-bold text-[11px]">
-                                  <span>{sportDetails.icon}</span>
-                                  <span>{sportDetails.name}</span>
-                                </span>
-                              );
-                            })
-                          ) : (
-                            <span className="text-slate-400 italic">لا يوجد تخصص</span>
+                        <div className="space-y-1.5 max-w-[240px]">
+                          {/* Referee specialties */}
+                          {specialties.length > 0 && (
+                            <div className="flex flex-wrap gap-1">
+                              {specialties.map(spec => {
+                                const sportDetails = SPORTS_MAP[spec];
+                                if (!sportDetails) return null;
+                                return (
+                                  <span key={spec} className="inline-flex items-center gap-1 px-2 py-0.5 bg-purple-50 text-purple-700 border border-purple-100 rounded-md font-bold text-[10px]" title="حكم معتمد">
+                                    <span>{sportDetails.icon}</span>
+                                    <span>{sportDetails.name} (حكم)</span>
+                                  </span>
+                                );
+                              })}
+                            </div>
+                          )}
+
+                          {/* Committee Head */}
+                          {teacher.isTechCommitteeHead && teacher.techCommitteeSports && teacher.techCommitteeSports.length > 0 && (
+                            <div className="flex flex-wrap gap-1">
+                              {teacher.techCommitteeSports.map(spec => {
+                                const sportDetails = SPORTS_MAP[spec];
+                                if (!sportDetails) return null;
+                                return (
+                                  <span key={`head-${spec}`} className="inline-flex items-center gap-1 px-2 py-0.5 bg-blue-50 text-blue-800 border border-blue-100 rounded-md font-bold text-[10px]" title="رئيس لجنة تقنية إقليمية">
+                                    <span>{sportDetails.icon}</span>
+                                    <span>{sportDetails.name} (رئيس)</span>
+                                  </span>
+                                );
+                              })}
+                            </div>
+                          )}
+
+                          {/* Committee Member */}
+                          {teacher.isTechCommitteeMember && teacher.techCommitteeSportsMemberOf && teacher.techCommitteeSportsMemberOf.length > 0 && (
+                            <div className="flex flex-wrap gap-1">
+                              {teacher.techCommitteeSportsMemberOf.map(spec => {
+                                const sportDetails = SPORTS_MAP[spec];
+                                if (!sportDetails) return null;
+                                return (
+                                  <span key={`member-${spec}`} className="inline-flex items-center gap-1 px-2 py-0.5 bg-indigo-50 text-indigo-800 border border-indigo-100 rounded-md font-bold text-[10px]" title="عضو لجنة تقنية إقليمية">
+                                    <span>{sportDetails.icon}</span>
+                                    <span>{sportDetails.name} (عضو)</span>
+                                  </span>
+                                );
+                              })}
+                            </div>
+                          )}
+
+                          {specialties.length === 0 && !teacher.isTechCommitteeHead && !teacher.isTechCommitteeMember && (
+                            <span className="text-slate-400 italic text-[11px]">لا يوجد تكليف</span>
                           )}
                         </div>
                       </td>
@@ -348,19 +510,46 @@ export const Teachers: React.FC = () => {
                         </div>
                       </td>
 
-                      {/* View Button */}
+                      {/* Actions */}
                       <td className="px-6 py-4 text-center">
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleOpenTeacherDetail(teacher);
-                          }}
-                          className="inline-flex items-center gap-1 px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 font-bold text-xs rounded-xl border border-blue-200 transition-all cursor-pointer shadow-3xs"
-                        >
-                          <Eye className="h-3.5 w-3.5" />
-                          <span>عرض البطاقة</span>
-                        </button>
+                        <div className="flex items-center justify-center gap-1.5">
+                          {(userProfile?.role === 'CENTRAL_ADMIN' || userProfile?.role === 'SPORT_MANAGER') ? (
+                            <>
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleOpenEditRole(teacher);
+                                }}
+                                className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 font-bold text-xs rounded-xl border border-emerald-200 transition-all cursor-pointer shadow-3xs"
+                                title="تعديل بيانات الأستاذ ومهامه"
+                              >
+                                <Pencil className="h-3.5 w-3.5" />
+                                <span>تعديل</span>
+                              </button>
+                              <button
+                                type="button"
+                                onClick={(e) => handleDeleteClick(e, teacher)}
+                                className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-red-50 hover:bg-red-100 text-red-600 font-bold text-xs rounded-xl border border-red-200 transition-all cursor-pointer shadow-3xs"
+                                title="حذف حساب الأستاذ نهائياً"
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                                <span>حذف</span>
+                              </button>
+                            </>
+                          ) : null}
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleOpenTeacherDetail(teacher);
+                            }}
+                            className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 font-bold text-xs rounded-xl border border-blue-200 transition-all cursor-pointer shadow-3xs"
+                          >
+                            <Eye className="h-3.5 w-3.5" />
+                            <span>عرض البطاقة</span>
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   );
@@ -391,22 +580,64 @@ export const Teachers: React.FC = () => {
                         )}
                       </div>
                       <div>
-                        <p className="font-bold text-slate-800 text-sm">{teacher.fullName}</p>
+                        <p className="font-bold text-slate-800 text-sm flex items-center gap-1 flex-wrap">
+                          <span>{teacher.fullName}</span>
+                          <span className={`text-[9px] font-bold px-1.5 py-0.2 rounded border ${getCadreBadge(teacher.teachingCadre).bg}`}>
+                            {getCadreBadge(teacher.teachingCadre).text}
+                          </span>
+                          {teacher.isTechCommitteeHead && (
+                            <span className="text-[9px] bg-blue-100 text-blue-800 font-black px-1.5 py-0.2 rounded border border-blue-200">
+                              رئيس لجنة
+                            </span>
+                          )}
+                          {teacher.isTechCommitteeMember && (
+                            <span className="text-[9px] bg-indigo-100 text-indigo-800 font-black px-1.5 py-0.2 rounded border border-indigo-200">
+                              عضو لجنة
+                            </span>
+                          )}
+                        </p>
                         <p className="text-[10px] text-slate-400 font-medium">{teacher.email}</p>
                       </div>
                     </div>
 
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleOpenTeacherDetail(teacher);
-                      }}
-                      className="px-2.5 py-1 bg-blue-50 text-blue-700 font-bold text-[11px] rounded-lg border border-blue-200 flex items-center gap-1"
-                    >
-                      <Eye className="h-3 w-3" />
-                      <span>التفاصيل</span>
-                    </button>
+                     <div className="flex items-center gap-1.5 flex-wrap">
+                      {(userProfile?.role === 'CENTRAL_ADMIN' || userProfile?.role === 'SPORT_MANAGER') ? (
+                        <>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleOpenEditRole(teacher);
+                            }}
+                            className="px-2.5 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 font-bold text-[11px] rounded-lg border border-emerald-200 flex items-center gap-1 cursor-pointer transition-colors"
+                            title="تعديل بيانات الأستاذ ومهامه"
+                          >
+                            <Pencil className="h-3 w-3" />
+                            <span>تعديل</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={(e) => handleDeleteClick(e, teacher)}
+                            className="px-2.5 py-1 bg-red-50 hover:bg-red-100 text-red-600 font-bold text-[11px] rounded-lg border border-red-200 flex items-center gap-1 cursor-pointer transition-colors"
+                            title="حذف حساب الأستاذ نهائياً"
+                          >
+                            <Trash2 className="h-3 w-3" />
+                            <span>حذف</span>
+                          </button>
+                        </>
+                      ) : null}
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleOpenTeacherDetail(teacher);
+                        }}
+                        className="px-2.5 py-1 bg-blue-50 hover:bg-blue-100 text-blue-700 font-bold text-[11px] rounded-lg border border-blue-200 flex items-center gap-1 cursor-pointer transition-colors"
+                      >
+                        <Eye className="h-3 w-3" />
+                        <span>التفاصيل</span>
+                      </button>
+                    </div>
                   </div>
 
                   <div className="grid grid-cols-2 gap-3 text-xs bg-slate-50 p-3 rounded-xl border border-slate-100">
@@ -433,12 +664,43 @@ export const Teachers: React.FC = () => {
       )}
 
       {/* Teacher Detail Modal */}
-      <TeacherDetailModal
-        isOpen={isDetailModalOpen}
-        onClose={() => setIsDetailModalOpen(false)}
-        teacher={selectedTeacherModal}
-        teacherStudents={teacherStudents}
-      />
+      {isDetailModalOpen && (
+        <TeacherDetailModal
+          isOpen={isDetailModalOpen}
+          onClose={() => setIsDetailModalOpen(false)}
+          teacher={selectedTeacherModal}
+          teacherStudents={teacherStudents}
+          onEditRole={handleOpenEditRole}
+        />
+      )}
+
+      {/* Edit Teacher Role/Cadre Modal */}
+      {isEditRoleModalOpen && (
+        <EditTeacherRoleModal
+          isOpen={isEditRoleModalOpen}
+          onClose={() => setIsEditRoleModalOpen(false)}
+          teacher={selectedTeacherForEdit}
+          schools={schools}
+          onSuccess={handleTeacherUpdated}
+          onDelete={handleTeacherDeleted}
+        />
+      )}
+
+      {/* Confirm Direct Delete Modal */}
+      {isDeleteModalOpen && teacherToDelete && (
+        <ConfirmDeleteModal
+          isOpen={isDeleteModalOpen}
+          onClose={() => {
+            setIsDeleteModalOpen(false);
+            setTeacherToDelete(null);
+          }}
+          onConfirm={handleConfirmDelete}
+          title="حذف حساب الأستاذ نهائياً"
+          message={`هل أنت متأكد من رغبتك في حذف حساب الأستاذ ${teacherToDelete.fullName} بالكامل؟ سيؤدي ذلك لإزالة بياناته وملفه التعريفي من النظام بشكل نهائي.`}
+          itemName={teacherToDelete.fullName}
+          isDeleting={isDeleting}
+        />
+      )}
     </div>
   );
 };

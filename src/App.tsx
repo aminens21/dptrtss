@@ -16,6 +16,7 @@ import { SportsConfig } from './pages/SportsConfig';
 import { TeacherTeams } from './pages/TeacherTeams';
 import { TechCommitteeHeads } from './pages/TechCommitteeHeads';
 import { Statistics } from './pages/Statistics';
+import { Directorates } from './pages/Directorates';
 
 import { Toaster } from 'react-hot-toast';
 
@@ -43,6 +44,7 @@ export default function App() {
               <Route path="teachers" element={<Teachers />} />
               <Route path="referees" element={<Referees />} />
               <Route path="sports-config" element={<SportsConfig />} />
+              <Route path="directorates" element={<Directorates />} />
               <Route path="teacher-teams" element={<TeacherTeams />} />
               <Route path="tech-committee" element={<TechCommitteeHeads />} />
               <Route path="statistics" element={<Statistics />} />

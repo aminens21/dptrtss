@@ -1,7 +1,9 @@
 import React, { useEffect, useState, useMemo } from 'react';
+import { useSearchParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import { DataService, SPORTS_MAP, getAgeCategoriesForSeason, deduplicateById } from '../lib/dataService';
-import { Tournament, User, Student, School, Sport, Match } from '../types';
+import { DataService, SPORTS_MAP, getAgeCategoriesForSeason, deduplicateById, getCategoryGenderLabel, isClubTournament, normalizeCategoryKey } from '../lib/dataService';
+import { Tournament, User, Student, School, Sport, Match, Directorate } from '../types';
+import { CountdownTimer } from '../components/CountdownTimer';
 import * as XLSX from 'xlsx';
 import {
   Plus,
@@ -20,17 +22,42 @@ import {
   Edit,
   AlertCircle,
   CheckCircle2,
-  Settings
+  Settings,
+  GraduationCap,
+  Award,
+  Medal,
+  Download
 } from 'lucide-react';
 import { CreateTournamentModal } from '../components/CreateTournamentModal';
+import { EditTournamentModal } from '../components/EditTournamentModal';
 import { ConfirmDeleteModal } from '../components/ConfirmDeleteModal';
 import { CrossCountryChampionshipModal } from '../components/CrossCountryChampionshipModal';
 import { SportChampionshipModal } from '../components/SportChampionshipModal';
+import { EditTournamentScheduleModal } from '../components/EditTournamentScheduleModal';
+import { ProgramExportModal } from '../components/ProgramExportModal';
+import { TeacherTeams } from './TeacherTeams';
 import toast from 'react-hot-toast';
 
 export const Tournaments: React.FC = () => {
   const { userProfile } = useAuth();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const urlTab = searchParams.get('tab') || searchParams.get('level');
+
+  const [activeBranch, setActiveBranch] = useState<'provincial' | 'regional' | 'national' | 'registration'>(
+    urlTab === 'regional' ? 'regional' :
+    urlTab === 'national' ? 'national' :
+    urlTab === 'registration' || urlTab === 'teams' ? 'registration' : 'provincial'
+  );
+
+  useEffect(() => {
+    if (urlTab === 'regional') setActiveBranch('regional');
+    else if (urlTab === 'national') setActiveBranch('national');
+    else if (urlTab === 'registration' || urlTab === 'teams') setActiveBranch('registration');
+    else if (urlTab === 'provincial') setActiveBranch('provincial');
+  }, [urlTab]);
+
   const [tournaments, setTournaments] = useState<Tournament[]>([]);
+  const [activeDirObj, setActiveDirObj] = useState<Directorate | null>(null);
   const [sportsConfig, setSportsConfig] = useState<Sport[]>([]);
   const [teachers, setTeachers] = useState<User[]>([]);
   const [allStudents, setAllStudents] = useState<Student[]>([]);
@@ -42,79 +69,159 @@ export const Tournaments: React.FC = () => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isCcModalOpen, setIsCcModalOpen] = useState(false);
   const [filterSport, setFilterSport] = useState<string>('ALL');
-  const [filterStatus, setFilterStatus] = useState<'ALL' | 'PROGRAMMED' | 'UNPROGRAMMED'>('ALL');
+  const [filterStatus, setFilterStatus] = useState<'ALL' | 'PROGRAMMED' | 'UNPROGRAMMED' | 'MY_SCHOOL'>('ALL');
+
+  const navigate = useNavigate();
 
   // Sport Championship Modal State
   const [selectedSportForModal, setSelectedSportForModal] = useState<Sport | null>(null);
   const [isSportModalOpen, setIsSportModalOpen] = useState(false);
   const [preselectedSportId, setPreselectedSportId] = useState<string | undefined>(undefined);
 
+  // Schedule and Dates Modal State
+  const [selectedSportForSchedule, setSelectedSportForSchedule] = useState<Sport | null>(null);
+  const [isScheduleModalOpen, setIsScheduleModalOpen] = useState(false);
+
+  // Program Export Modal State
+  const [isExportModalOpen, setIsExportModalOpen] = useState(false);
+  const [exportModalInitialSports, setExportModalInitialSports] = useState<string[]>([]);
+
+  // Edit Specific Tournament Modal state
+  const [editingTournament, setEditingTournament] = useState<Tournament | null>(null);
+
   // Deletion Modal state
   const [tournamentToDelete, setTournamentToDelete] = useState<Tournament | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [sportToDeleteAll, setSportToDeleteAll] = useState<{ id: string; name: string } | null>(null);
+  const [isDeletingAll, setIsDeletingAll] = useState(false);
+
+  // Matching teacher profile from database to ensure real-time permission sync
+  const currentTeacherProfile = useMemo(() => {
+    if (!userProfile) return null;
+    return teachers.find(t =>
+      (t.id && t.id === userProfile.id) ||
+      (t.email && userProfile.email && t.email.toLowerCase() === userProfile.email.toLowerCase()) ||
+      (t.leaseNumber && userProfile.leaseNumber && t.leaseNumber === userProfile.leaseNumber)
+    );
+  }, [teachers, userProfile]);
 
   // Only CENTRAL_ADMIN and Technical Committee Heads can create, assign or delete tournaments
-  const isCentralAdmin = userProfile?.role === 'CENTRAL_ADMIN';
-  const isSportManager = userProfile?.role === 'SPORT_MANAGER';
-  const isTechCommitteeHead = userProfile?.isTechCommitteeHead === true;
+  const effectiveRole = currentTeacherProfile?.role || userProfile?.role;
+  const isCentralAdmin = effectiveRole === 'CENTRAL_ADMIN';
+  const isSportManager = effectiveRole === 'SPORT_MANAGER';
+  const isTechCommitteeHead = userProfile?.isTechCommitteeHead === true || currentTeacherProfile?.isTechCommitteeHead === true;
+
+  // Helper to format category for badges elegantly in Arabic
+  const formatCategoryBadge = (catId: string) => {
+    const norm = normalizeCategoryKey(catId);
+    const match = activeSeason.match(/(\d{4})/);
+    const startYear = match ? parseInt(match[1], 10) : 2026;
+
+    if (norm === 'U12') {
+      return {
+        label: 'براعم / برعمات',
+        years: `مواليد ${startYear - 11} وما بعد`
+      };
+    }
+    if (norm === 'U15') {
+      return {
+        label: 'صغار / صغيرات',
+        years: `مواليد ${startYear - 14}/${startYear - 13}/${startYear - 12}`
+      };
+    }
+    if (norm === 'U18') {
+      return {
+        label: 'فتيان / فتيات',
+        years: `مواليد ${startYear - 17}/${startYear - 16}/${startYear - 15}`
+      };
+    }
+    if (norm === 'U20') {
+      return {
+        label: 'شبان / شابات',
+        years: `مواليد ${startYear - 17} وما بعد`
+      };
+    }
+    return { label: catId, years: '' };
+  };
 
   // Allowed sport IDs for technical committee head
   const allowedSportIds = useMemo(() => {
     if (isCentralAdmin) return null; // null means unrestricted
     if (isTechCommitteeHead) {
-      const list: string[] = [];
-      if (userProfile?.techCommitteeSports && userProfile.techCommitteeSports.length > 0) {
-        list.push(...userProfile.techCommitteeSports);
+      const set = new Set<string>();
+      if (userProfile?.techCommitteeSports) {
+        userProfile.techCommitteeSports.forEach(s => set.add(s));
       }
-      if (userProfile?.sportId && !list.includes(userProfile.sportId)) {
-        list.push(userProfile.sportId);
+      if (currentTeacherProfile?.techCommitteeSports) {
+        currentTeacherProfile.techCommitteeSports.forEach(s => set.add(s));
       }
-      return list;
+      if (userProfile?.sportId) set.add(userProfile.sportId);
+      if (currentTeacherProfile?.sportId) set.add(currentTeacherProfile.sportId);
+      return Array.from(set);
     }
     return [];
-  }, [isCentralAdmin, isTechCommitteeHead, userProfile]);
+  }, [isCentralAdmin, isTechCommitteeHead, userProfile, currentTeacherProfile]);
 
   const canCreate = isCentralAdmin || (isTechCommitteeHead && (allowedSportIds === null || allowedSportIds.length > 0));
-
-  const canManageSport = (sportId: string) => {
-    if (isCentralAdmin) return true;
-    if (isTechCommitteeHead && allowedSportIds && allowedSportIds.includes(sportId)) return true;
-    return false;
-  };
 
   // Determine manager sport specialty
   const managerSportId = useMemo(() => {
     if (!isSportManager) return undefined;
     if (userProfile?.sportId) return userProfile.sportId;
+    if (currentTeacherProfile?.sportId) return currentTeacherProfile.sportId;
     const assignedTourn = tournaments.find(t =>
       (t.managerEmail && t.managerEmail.toLowerCase() === userProfile?.email?.toLowerCase()) ||
       (t.managerName && t.managerName === userProfile?.fullName)
     );
     return assignedTourn?.sportId || 'basketball';
-  }, [userProfile, isSportManager, tournaments]);
+  }, [userProfile, currentTeacherProfile, isSportManager, tournaments]);
+
+  const canManageSport = (sportId: string) => {
+    if (isCentralAdmin) return true;
+    if (isTechCommitteeHead && allowedSportIds && allowedSportIds.includes(sportId)) return true;
+    if (isSportManager && managerSportId === sportId) return true;
+    return false;
+  };
 
   useEffect(() => {
     loadData();
+    const handleDirChange = () => {
+      loadData();
+    };
+    window.addEventListener('directorateChanged', handleDirChange);
+    return () => {
+      window.removeEventListener('directorateChanged', handleDirChange);
+    };
   }, []);
 
   const loadData = async () => {
     setLoading(true);
     try {
-      const [tournList, sportsList, season, allTeachers, studentsList, schoolsList, matchList] = await Promise.all([
+      const activeDirId = DataService.getActiveDirectorateId();
+      const [tournList, sportsList, season, allTeachers, studentsList, schoolsList, matchList, activeDir] = await Promise.all([
         DataService.getTournaments(),
         DataService.getSportsConfig(),
         DataService.getActiveSeason(),
         DataService.getTeachers(),
         DataService.getStudents(),
         DataService.getSchools(),
-        DataService.getMatches()
+        DataService.getMatches(),
+        DataService.getActiveDirectorate()
       ]);
-      setTournaments(deduplicateById(tournList));
+
+      const dirTeachers = allTeachers.filter(t => (t.directorateId || 'taourirt') === activeDirId);
+      const dirStudents = studentsList.filter(st => (st.directorateId || 'taourirt') === activeDirId);
+      const dirSchools = schoolsList.filter(s => (s.directorateId || 'taourirt') === activeDirId);
+      const dirMatches = matchList.filter(m => (m.directorateId || 'taourirt') === activeDirId);
+      const dirTournaments = tournList.filter(t => (t.directorateId || 'taourirt') === activeDirId);
+
+      setActiveDirObj(activeDir);
+      setTournaments(deduplicateById(dirTournaments));
       setSportsConfig(sportsList);
-      setTeachers(deduplicateById(allTeachers));
-      setAllStudents(deduplicateById(studentsList));
-      setSchools(deduplicateById(schoolsList));
-      setMatches(deduplicateById(matchList));
+      setTeachers(deduplicateById(dirTeachers));
+      setAllStudents(deduplicateById(dirStudents));
+      setSchools(deduplicateById(dirSchools));
+      setMatches(deduplicateById(dirMatches));
       if (season) {
         setActiveSeason(season);
       }
@@ -130,18 +237,44 @@ export const Tournaments: React.FC = () => {
     try {
       const items = Array.isArray(newTourns) ? newTourns : [newTourns];
       const createdItems: Tournament[] = [];
-      
+      const skippedNames: string[] = [];
+
+      // Get latest tournaments from local/Firestore to have full up to date list
+      const latestTournaments = await DataService.getTournaments();
+
       for (const item of items) {
+        // Check duplication (case-insensitive & trimmed)
+        const isDuplicate = latestTournaments.some(t => 
+          t.name.trim().toLowerCase() === item.name.trim().toLowerCase() &&
+          t.seasonId === item.seasonId &&
+          t.directorateId === item.directorateId
+        );
+
+        if (isDuplicate) {
+          skippedNames.push(item.name);
+          continue;
+        }
+
         const created = await DataService.addTournament(item);
         createdItems.push(created);
       }
-      
-      setTournaments(prev => deduplicateById([...createdItems, ...prev]));
-      
-      if (items.length > 1) {
-        toast.success(`تم إنشاء وبرمجة ${items.length} بطولات بنجاح وفقاً للفئات والأجناس المحددة!`);
+
+      if (createdItems.length > 0) {
+        setTournaments(prev => deduplicateById([...createdItems, ...prev]));
+      }
+
+      if (skippedNames.length > 0) {
+        if (createdItems.length > 0) {
+          toast.success(`تم إنشاء ${createdItems.length} بطولات بنجاح! وتم تجاهل ${skippedNames.length} بطولات مكررة.`);
+        } else {
+          toast.error('تنبيه: لم يتم إنشاء أي بطولة لأن كافة الفئات والبطولات المحددة موجودة ومبرمجة بالفعل مسبقاً!');
+        }
       } else {
-        toast.success('تمت إضافة البطولة وبرمجتها بنجاح!');
+        if (createdItems.length > 1) {
+          toast.success(`تم إنشاء وبرمجة ${createdItems.length} بطولات بنجاح وفقاً للفئات والأجناس المحددة!`);
+        } else if (createdItems.length === 1) {
+          toast.success('تمت إضافة البطولة وبرمجتها بنجاح!');
+        }
       }
 
       // Refresh sports config to update statuses
@@ -177,6 +310,27 @@ export const Tournaments: React.FC = () => {
     }
   };
 
+  const handleConfirmDeleteAll = async () => {
+    if (!sportToDeleteAll) return;
+    setIsDeletingAll(true);
+    try {
+      await DataService.bulkDeleteTournamentsBySport(sportToDeleteAll.id);
+      
+      // Update local states
+      setTournaments(prev => prev.filter(t => t.sportId !== sportToDeleteAll.id));
+      
+      const updatedSports = await DataService.getSportsConfig();
+      setSportsConfig(updatedSports);
+      
+      toast.success(`تم مسح كافة بطولات رياضة "${sportToDeleteAll.name}" وإعادتها لحالة غير مبرمجة.`);
+      setSportToDeleteAll(null);
+    } catch (e) {
+      toast.error('تعذر مسح بطولات الرياضة');
+    } finally {
+      setIsDeletingAll(false);
+    }
+  };
+
   const handleExportAllCrossCountry = async () => {
     const loadToastId = toast.loading('جاري تحضير وتصدير ملف فئات العدو الريفي الثمانية...');
     try {
@@ -193,14 +347,14 @@ export const Tournaments: React.FC = () => {
       let hasData = false;
 
       const ccCategories = [
-        { category: 'U12', gender: 'Male', label: 'البراعم ذكور (U12)' },
-        { category: 'U12', gender: 'Female', label: 'البرعمات إناث (U12)' },
-        { category: 'U15', gender: 'Male', label: 'الصغار ذكور (U15)' },
-        { category: 'U15', gender: 'Female', label: 'الصغيرات إناث (U15)' },
-        { category: 'U18', gender: 'Male', label: 'الفتيان ذكور (U18)' },
-        { category: 'U18', gender: 'Female', label: 'الفتيات إناث (U18)' },
-        { category: 'U20', gender: 'Male', label: 'الشبان ذكور (U20)' },
-        { category: 'U20', gender: 'Female', label: 'الشابات إناث (U20)' },
+        { category: 'U12', gender: 'Male', label: 'البراعم ذكور' },
+        { category: 'U12', gender: 'Female', label: 'البرعمات إناث' },
+        { category: 'U15', gender: 'Male', label: 'الصغار ذكور' },
+        { category: 'U15', gender: 'Female', label: 'الصغيرات إناث' },
+        { category: 'U18', gender: 'Male', label: 'الفتيان ذكور' },
+        { category: 'U18', gender: 'Female', label: 'الفتيات إناث' },
+        { category: 'U20', gender: 'Male', label: 'الشبان ذكور' },
+        { category: 'U20', gender: 'Female', label: 'الشابات إناث' },
       ];
 
       ccCategories.forEach(cat => {
@@ -255,16 +409,18 @@ export const Tournaments: React.FC = () => {
   // Group tournaments by sport & check programming status
   const sportsWithTournamentData = useMemo(() => {
     const seasonalCats = getAgeCategoriesForSeason(activeSeason);
+    const isTeacherRole = effectiveRole === 'TEACHER';
+    const teacherSchoolName = userProfile?.workLocation;
 
     return sportsConfig.map(sport => {
       const sportTournaments = tournaments.filter(t => t.sportId === sport.id);
       
       // Determine if programmed
-      const isProgrammed = sport.isProgrammed !== undefined
-        ? sport.isProgrammed
-        : (sport.id === 'cross_country' ||
-           sportTournaments.length > 0 ||
-           (sport.ageCategories && sport.ageCategories.length > 0 && sport.studentLimit !== undefined && sport.studentLimit > 0));
+      const isProgrammed = sportTournaments.length > 0
+        ? true
+        : (sport.isProgrammed !== undefined
+          ? sport.isProgrammed
+          : (sport.ageCategories && sport.ageCategories.length > 0 && sport.studentLimit !== undefined && sport.studentLimit > 0));
 
       // Technical head
       const techHead = teachers.find(tch =>
@@ -272,13 +428,22 @@ export const Tournaments: React.FC = () => {
         (tch.techCommitteeSports?.includes(sport.id) || tch.sportId === sport.id)
       );
 
-      // Categories
+      // Categories list configured
       const categoriesList = (sport.ageCategories && sport.ageCategories.length > 0)
         ? sport.ageCategories
-        : seasonalCats.map(c => c.id);
+        : (sportTournaments.length > 0 
+          ? Array.from(new Set(sportTournaments.map(t => t.ageCategory).filter(Boolean)))
+          : seasonalCats.map(c => c.id));
 
-      // Student count
+      // Total students registered in this sport across all schools
       const registeredCount = allStudents.filter(s => s.sportId === sport.id).length;
+
+      // School-specific participation (for teachers/schools)
+      const schoolSportStudents = teacherSchoolName
+        ? allStudents.filter(s => s.sportId === sport.id && s.schoolName === teacherSchoolName)
+        : [];
+      const hasParticipations = schoolSportStudents.length > 0;
+      const schoolRegisteredCount = schoolSportStudents.length;
 
       return {
         sport,
@@ -286,15 +451,18 @@ export const Tournaments: React.FC = () => {
         isProgrammed,
         techHead,
         categoriesList,
-        registeredCount
+        registeredCount,
+        hasParticipations,
+        schoolRegisteredCount,
+        isTeacherRole
       };
     });
-  }, [sportsConfig, tournaments, teachers, allStudents, activeSeason]);
+  }, [sportsConfig, tournaments, teachers, allStudents, activeSeason, effectiveRole, userProfile]);
 
   // Filtered sports list
   const filteredSports = useMemo(() => {
     return sportsWithTournamentData.filter(item => {
-      const { sport, isProgrammed, techHead } = item;
+      const { sport, isProgrammed, techHead, hasParticipations } = item;
 
       // Filter by Sport
       if (filterSport !== 'ALL' && sport.id !== filterSport) return false;
@@ -302,6 +470,7 @@ export const Tournaments: React.FC = () => {
       // Filter by Status
       if (filterStatus === 'PROGRAMMED' && !isProgrammed) return false;
       if (filterStatus === 'UNPROGRAMMED' && isProgrammed) return false;
+      if (filterStatus === 'MY_SCHOOL' && !hasParticipations) return false;
 
       // Search filter
       if (search.trim()) {
@@ -323,36 +492,36 @@ export const Tournaments: React.FC = () => {
 
   return (
     <div className="space-y-4" dir="rtl">
-      {/* Top action header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white p-4 md:p-5 rounded-2xl border border-slate-200 shadow-3xs">
-        <div>
-          <div className="flex items-center gap-2">
-            <h2 className="text-base md:text-lg font-black text-slate-800">بطولات الرياضات الإقليمية (مجمعة حسب التخصص)</h2>
-            <span className="text-[10px] bg-blue-50 text-blue-700 font-extrabold px-2 py-0.5 rounded-full border border-blue-200">
-              مديرية تاوريرت
-            </span>
-          </div>
-          <p className="text-xs text-slate-500 font-medium mt-0.5">
-            تجميع كافة الفئات داخل بطولة كل رياضة. تكون الرياضات غير المعدة باللون الرمادي إلى حين إعداد ضوابطها وبرمجتها.
-          </p>
-        </div>
+      {activeBranch === 'registration' ? (
+        <TeacherTeams />
+      ) : (
+        <div className="space-y-4">
+          {/* Top action header */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white p-4 md:p-5 rounded-2xl border border-slate-200 shadow-3xs">
+            <div>
+              <div className="flex items-center gap-2">
+                <h2 className="text-base md:text-lg font-black text-slate-800">
+                  {activeBranch === 'regional' && 'البطولة الجهوية للرياضة المدرسية (جهة الشرق)'}
+                  {activeBranch === 'national' && 'البطولة الوطنية المدرسية (الجامعة الملكية المغربية للرياضة المدرسية)'}
+                  {activeBranch === 'provincial' && `بطولات الرياضات الإقليمية (${activeDirObj?.name || 'المديرية الإقليمية'})`}
+                </h2>
+                <span className={`text-[10px] font-extrabold px-2 py-0.5 rounded-full border ${
+                  activeBranch === 'regional' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' :
+                  activeBranch === 'national' ? 'bg-amber-50 text-amber-700 border-amber-200' :
+                  'bg-blue-50 text-blue-700 border-blue-200'
+                }`}>
+                  {activeBranch === 'regional' ? 'أكاديمية جهة الشرق' : activeBranch === 'national' ? 'القطاع الوطني' : (activeDirObj?.shortName || activeDirObj?.name || 'المديرية الإقليمية')}
+                </span>
+              </div>
+              <p className="text-xs text-slate-500 font-medium mt-0.5">
+                {activeBranch === 'regional' && 'استعراض ومتابعة البطولات والتأهيلات الجهوية على مستوى كافة مديريات جهة الشرق.'}
+                {activeBranch === 'national' && 'برمجة وتتبع المشاركات في البطولات الوطنية المدرسية المنظمة تحت إشراف الوزارة والجامعة الملكية.'}
+                {activeBranch === 'provincial' && 'تجميع كافة الفئات داخل بطولة كل رياضة. تكون الرياضات غير المعدة باللون الرمادي إلى حين إعداد ضوابطها وبرمجتها.'}
+              </p>
+            </div>
 
-        {canCreate && (
-          <div className="flex flex-wrap items-center gap-2">
-            <button
-              onClick={handleExportAllCrossCountry}
-              className="inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-600 px-3.5 py-2 text-xs font-bold text-white shadow-xs hover:bg-emerald-700 transition-colors cursor-pointer"
-            >
-              <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                <polyline points="14 2 14 8 20 8" />
-                <line x1="16" y1="13" x2="8" y2="13" />
-                <line x1="16" y1="17" x2="8" y2="17" />
-                <polyline points="10 9 9 9 8 9" />
-              </svg>
-              <span>ملف العدو الريفي (8 فئات)</span>
-            </button>
-
+        <div className="flex flex-wrap items-center gap-2">
+          {canCreate && (
             <button
               onClick={() => handleOpenProgramModal()}
               className="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-xs font-bold text-white shadow-xs hover:bg-blue-700 transition-colors cursor-pointer"
@@ -360,8 +529,8 @@ export const Tournaments: React.FC = () => {
               <Plus className="h-4 w-4" />
               <span>إضافة / برمجة بطولة جديدة</span>
             </button>
-          </div>
-        )}
+          )}
+        </div>
       </div>
 
       {/* Notice for Sport Managers */}
@@ -426,7 +595,10 @@ export const Tournaments: React.FC = () => {
               className="text-xs font-bold text-slate-700 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-xl px-2.5 py-1.5 focus:outline-none cursor-pointer"
             >
               <option value="ALL">جميع الحالات</option>
-              <option value="PROGRAMMED">🟢 المبرمجة فقط</option>
+              <option value="PROGRAMMED">🟢 المبرمجة والمفتوحة للتسجيل</option>
+              {userProfile?.role === 'TEACHER' && (
+                <option value="MY_SCHOOL">🏫 رياضات تشارك فيها مؤسستي</option>
+              )}
               <option value="UNPROGRAMMED">⚪ غير المبرمجة (في طور الإعداد)</option>
             </select>
           </div>
@@ -459,12 +631,77 @@ export const Tournaments: React.FC = () => {
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {filteredSports.length > 0 ? (
             filteredSports.map((item, index) => {
-              const { sport, sportTournaments, isProgrammed, techHead, categoriesList, registeredCount } = item;
+              const { sport, sportTournaments, isProgrammed, techHead, categoriesList, registeredCount, hasParticipations, schoolRegisteredCount } = item;
               const isManagerSpecialty = managerSportId && sport.id === managerSportId;
               const canManageThis = canManageSport(sport.id);
 
+              // If regional or national branch, show locked/closed state for all sports
+              if (activeBranch === 'regional' || activeBranch === 'national') {
+                const isReg = activeBranch === 'regional';
+                return (
+                  <div
+                    key={sport.id}
+                    className="flex flex-col rounded-2xl bg-slate-50 border border-slate-200 text-slate-500 overflow-hidden shadow-2xs opacity-90 transition-all hover:opacity-100"
+                  >
+                    <div className="p-4 md:p-5 flex-1 space-y-3">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex items-center gap-2.5">
+                          <div className="w-10 h-10 rounded-2xl bg-slate-100 text-xl flex items-center justify-center border border-slate-200 grayscale opacity-80">
+                            {sport.icon || '🏆'}
+                          </div>
+                          <div>
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">
+                                {isReg ? 'البطولة الجهوية' : 'البطولة الوطنية'}
+                              </span>
+                            </div>
+                            <span className="text-[10px] font-medium text-slate-400">الموسم {activeSeason}</span>
+                          </div>
+                        </div>
+
+                        <span className="inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[10px] font-bold bg-slate-200 text-slate-600 border border-slate-300">
+                          <Lock className="h-3 w-3 text-slate-500" />
+                          {isReg ? 'مغلقة جهوياً' : 'مغلقة وطنياً'}
+                        </span>
+                      </div>
+
+                      <h3 className="text-sm font-bold text-slate-700 leading-snug">
+                        {isReg ? `البطولة الجهوية المدرسية لـ ${sport.name}` : `البطولة الوطنية المدرسية لـ ${sport.name}`}
+                      </h3>
+
+                      <p className="text-xs text-slate-500 leading-relaxed bg-white/60 p-2.5 rounded-xl border border-slate-200/60">
+                        {isReg
+                          ? 'هذه البطولة مغلقة حالياً. سيتم تفعيل التسجيل التلقائي واستيراد المتأهلين من المديريات فور إعداد وبرمجة البطولة من طرف الأكاديمية الجهوية للتربية والتكوين لجهة الشرق.'
+                          : 'هذه البطولة مغلقة حالياً. سيتم تفعيل المشاركة فور إعداد وبرمجة البطولة وتحديد التواريخ من طرف الوزارة والجامعة الملكية المغربية للرياضة المدرسية.'}
+                      </p>
+
+                      {/* Organizer info */}
+                      <div className="bg-slate-100/50 p-2.5 rounded-xl border border-slate-200/60 flex items-center justify-between text-xs">
+                        <div className="flex items-center gap-1.5 text-slate-600 font-medium">
+                          <ShieldCheck className="h-4 w-4 text-slate-500" />
+                          <span>الجهة المنظمة:</span>
+                        </div>
+                        <span className="font-bold text-slate-700">
+                          {isReg ? 'أكاديمية جهة الشرق' : 'الوزارة والجامعة الملكية للرياضة المدرسية'}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="p-3 bg-slate-100/60 border-t border-slate-200 flex items-center justify-between gap-2">
+                      <button
+                        disabled
+                        className="w-full py-2 px-3 bg-slate-200 text-slate-400 font-bold text-xs rounded-xl flex items-center justify-center gap-2 cursor-not-allowed border border-slate-300"
+                      >
+                        <Lock className="h-3.5 w-3.5" />
+                        <span>في انتظار البرمجة {isReg ? 'الجهوية' : 'الوطنية'}</span>
+                      </button>
+                    </div>
+                  </div>
+                );
+              }
+
               // 1. Cross Country Championship Card
-              if (sport.id === 'cross_country') {
+              if (sport.id === 'cross_country' && isProgrammed) {
                 return (
                   <div
                     key={sport.id}
@@ -490,9 +727,12 @@ export const Tournaments: React.FC = () => {
                           </div>
                         </div>
 
-                        <span className="inline-flex items-center rounded-md px-2 py-0.5 text-[10px] font-bold bg-blue-500/20 text-blue-300 border border-blue-500/30">
-                          بطولة واحدة شاملة
-                        </span>
+                        <div className="flex flex-col items-end gap-1">
+                          <span className="inline-flex items-center rounded-md px-2 py-0.5 text-[10px] font-bold bg-blue-500/20 text-blue-300 border border-blue-500/30">
+                            بطولة واحدة شاملة
+                          </span>
+                          <CountdownTimer deadline={sportTournaments.find(t => t.registrationDeadline)?.registrationDeadline} compact={true} />
+                        </div>
                       </div>
 
                       <div>
@@ -500,21 +740,21 @@ export const Tournaments: React.FC = () => {
                           البطولة الإقليمية المدرسية للعدو الريفي
                         </h3>
                         <p className="text-xs text-slate-300 mt-1 line-clamp-2 leading-relaxed font-medium">
-                          تجمع كافة السباقات للفئات العمرية الـ8 الذكور والإناث (U12, U15, U18, U20).
+                          تجمع كافة السباقات للفئات العمرية الـ8 الذكور والإناث.
                         </p>
                       </div>
 
                       {/* Categories Pills */}
                       <div className="bg-white/5 border border-white/10 p-2.5 rounded-xl space-y-1.5">
                         <div className="text-[10px] font-bold text-slate-300 flex items-center justify-between">
-                          <span>الفئات الثمانية المعتمدة (8 Categories):</span>
+                          <span>الفئات الثمانية المعتمدة:</span>
                           <span className="text-emerald-400 font-mono text-[9px]">{registeredCount} تلميذ(ة)</span>
                         </div>
                         <div className="flex flex-wrap gap-1 text-[10px]">
-                          <span className="bg-blue-500/20 text-blue-200 px-1.5 py-0.5 rounded border border-blue-500/30">البراعم U12</span>
-                          <span className="bg-emerald-500/20 text-emerald-200 px-1.5 py-0.5 rounded border border-emerald-500/30">الصغار U15</span>
-                          <span className="bg-amber-500/20 text-amber-200 px-1.5 py-0.5 rounded border border-amber-200/30">الفتيان U18</span>
-                          <span className="bg-purple-500/20 text-purple-200 px-1.5 py-0.5 rounded border border-purple-200/30">الشبان U20</span>
+                          <span className="bg-blue-500/20 text-blue-200 px-1.5 py-0.5 rounded border border-blue-500/30">البراعم / البرعمات</span>
+                          <span className="bg-emerald-500/20 text-emerald-200 px-1.5 py-0.5 rounded border border-emerald-500/30">الصغار / الصغيرات</span>
+                          <span className="bg-amber-500/20 text-amber-200 px-1.5 py-0.5 rounded border border-amber-200/30">الفتيان / الفتيات</span>
+                          <span className="bg-purple-500/20 text-purple-200 px-1.5 py-0.5 rounded border border-purple-200/30">الشبان / الشابات</span>
                         </div>
                       </div>
 
@@ -541,6 +781,37 @@ export const Tournaments: React.FC = () => {
                         <Layers className="h-4 w-4" />
                         <span>دخول البطولة واستعراض الفئات الـ8</span>
                       </button>
+
+                      {canManageThis && (
+                        <>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setSelectedSportForSchedule(sport);
+                              setIsScheduleModalOpen(true);
+                            }}
+                            title="تعديل وبرمجة تواريخ البطولة وآخر أجل للتسجيل"
+                            className="p-2 bg-amber-500/30 hover:bg-amber-500/50 text-amber-200 rounded-xl text-xs font-bold transition-colors cursor-pointer shrink-0 border border-amber-400/30 flex items-center gap-1"
+                          >
+                            <Calendar className="h-4 w-4" />
+                            <span className="hidden sm:inline">برمجة التواريخ</span>
+                          </button>
+
+                          {isCentralAdmin && (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSportToDeleteAll({ id: sport.id, name: sport.name });
+                              }}
+                              title="مسح كافة بطولات هذه الرياضة"
+                              className="p-2 bg-red-500/30 hover:bg-red-500/50 text-red-200 rounded-xl text-xs font-bold transition-colors cursor-pointer shrink-0 border border-red-400/30 flex items-center gap-1"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                              <span className="hidden sm:inline">مسح البطولات</span>
+                            </button>
+                          )}
+                        </>
+                      )}
 
                       <button
                         onClick={(e) => {
@@ -635,26 +906,56 @@ export const Tournaments: React.FC = () => {
               }
 
               // 3. PROGRAMMED SPORT CARD (Active Color Card)
+              const mainTourn = sportTournaments.length > 0 ? sportTournaments[0] : null;
+              const hasClubTournaments = sportTournaments.some(t => isClubTournament(t));
+              const hasSchoolOnlyTournaments = sportTournaments.some(t => !isClubTournament(t));
+              const hasBothClasses = hasClubTournaments && hasSchoolOnlyTournaments;
+              const isClub = isClubTournament(mainTourn) && !hasBothClasses;
+
               return (
                 <div
                   key={sport.id}
-                  className={`flex flex-col rounded-2xl bg-white border shadow-3xs overflow-hidden transition-all hover:shadow-md ${
+                  className={`flex flex-col rounded-2xl border shadow-3xs overflow-hidden transition-all hover:shadow-md ${
+                    isClub
+                      ? 'bg-amber-50/90 border-amber-300 hover:border-amber-400'
+                      : 'bg-white border-slate-200 hover:border-blue-300'
+                  } ${
                     isManagerSpecialty
-                      ? 'border-blue-300 ring-2 ring-blue-500/10'
-                      : 'border-slate-200 hover:border-blue-300'
+                      ? 'ring-2 ring-blue-500/20'
+                      : ''
                   }`}
                 >
                   <div className="p-4 md:p-5 flex-1 space-y-3">
                     <div className="flex items-start justify-between gap-2">
                       <div className="flex items-center gap-2.5">
-                        <div className="w-10 h-10 rounded-2xl bg-blue-50 text-xl flex items-center justify-center border border-blue-100 shadow-3xs">
+                        <div className={`w-10 h-10 rounded-2xl text-xl flex items-center justify-center border shadow-3xs ${
+                          isClub ? 'bg-amber-100/80 border-amber-300' : 'bg-blue-50 border-blue-100'
+                        }`}>
                           {sport.icon || '🏆'}
                         </div>
                         <div>
-                          <div className="flex items-center gap-1.5">
-                            <span className="text-[10px] font-bold text-blue-600 uppercase tracking-wider">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className="text-[10px] font-bold text-blue-900 uppercase tracking-wider">
                               {sport.name}
                             </span>
+                            {hasBothClasses ? (
+                              <div className="flex items-center gap-1 flex-wrap">
+                                <span className="text-[9px] font-extrabold bg-amber-100 text-amber-950 px-1.5 py-0.2 rounded border border-amber-300 shadow-3xs">
+                                  🟡 للمنتمين للأندية
+                                </span>
+                                <span className="text-[9px] font-extrabold bg-slate-100 text-slate-800 px-1.5 py-0.2 rounded border border-slate-300 shadow-3xs">
+                                  ⚪ لغير المنتمين للأندية
+                                </span>
+                              </div>
+                            ) : isClub ? (
+                              <span className="text-[9px] font-extrabold bg-amber-200 text-amber-950 px-1.5 py-0.2 rounded border border-amber-400 shadow-3xs">
+                                🟡 للمنتمين للأندية
+                              </span>
+                            ) : (
+                              <span className="text-[9px] font-extrabold bg-slate-100 text-slate-800 px-1.5 py-0.2 rounded border border-slate-300 shadow-3xs">
+                                ⚪ لغير المنتمين للأندية
+                              </span>
+                            )}
                             {isManagerSpecialty && (
                               <span className="inline-flex items-center gap-0.5 text-[9px] bg-amber-50 text-amber-800 font-bold px-1.5 py-0.2 rounded border border-amber-200">
                                 <Star className="h-2.5 w-2.5 fill-amber-500 text-amber-500" />
@@ -666,30 +967,75 @@ export const Tournaments: React.FC = () => {
                         </div>
                       </div>
 
-                      <span className="inline-flex items-center rounded-md px-2 py-0.5 text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
-                        🟢 مبرمجة ومفتوحة
-                      </span>
+                        <div className="flex flex-col items-end gap-1">
+                          {(() => {
+                            const statusVal = mainTourn?.status || 'Scheduled';
+                            if (statusVal === 'Ongoing') {
+                              return (
+                                <span className="inline-flex items-center rounded-md px-2 py-0.5 text-[10px] font-bold bg-blue-50 text-blue-700 border border-blue-200">
+                                  🔵 جارية
+                                </span>
+                              );
+                            } else if (statusVal === 'Completed' || statusVal === 'Archived') {
+                              return (
+                                <span className="inline-flex items-center rounded-md px-2 py-0.5 text-[10px] font-bold bg-amber-50 text-amber-800 border border-amber-300">
+                                  🏆 منتهية (مؤرشفة)
+                                </span>
+                              );
+                            } else {
+                              return (
+                                <span className="inline-flex items-center rounded-md px-2 py-0.5 text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                                  🟢 مفتوحة للتسجيل
+                                </span>
+                              );
+                            }
+                          })()}
+                          <CountdownTimer deadline={sportTournaments.find(t => t.registrationDeadline)?.registrationDeadline} compact={true} />
+                        </div>
                     </div>
 
-                    <h3 className="text-sm font-bold text-slate-800 leading-snug">
-                      البطولة الإقليمية المدرسية لـ {sport.name}
-                    </h3>
+                    <div className="flex items-center justify-between gap-2">
+                      <h3 className="text-sm font-bold text-slate-800 leading-snug">
+                        البطولة الإقليمية المدرسية لـ {sport.name}
+                      </h3>
+                      {userProfile?.role === 'TEACHER' && (
+                        <span className={`inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-md border shrink-0 ${
+                          hasParticipations
+                            ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                            : 'bg-amber-50 text-amber-800 border-amber-200'
+                        }`}>
+                          {hasParticipations ? `🏫 مسجل: ${schoolRegisteredCount}` : '🏫 غير مسجل بعد'}
+                        </span>
+                      )}
+                    </div>
 
-                    {/* Configured Categories & Limit */}
-                    <div className="text-[11px] text-slate-600 space-y-1 bg-slate-50 p-2.5 rounded-xl border border-slate-100">
-                      <div className="flex items-center justify-between">
-                        <span className="text-slate-500">الفئات المدمجة:</span>
-                        <div className="flex flex-wrap gap-1">
-                          {categoriesList.slice(0, 4).map(c => (
-                            <span key={c} className="bg-blue-100/80 text-blue-800 text-[9px] font-bold px-1.5 py-0.2 rounded">
-                              {c}
-                            </span>
-                          ))}
-                        </div>
-                      </div>
+                     {/* Configured Categories & Limit */}
+                     <div className="text-[11px] text-slate-600 space-y-1 bg-slate-50 p-2.5 rounded-xl border border-slate-100">
+                       <div className="flex items-start justify-between gap-2">
+                         <span className="text-slate-500 mt-1 shrink-0">الفئات المدمجة:</span>
+                         <div className="flex flex-col gap-1 items-end max-w-[75%]">
+                           {categoriesList.slice(0, 4).map(c => {
+                             const badge = formatCategoryBadge(c);
+                             return (
+                               <span 
+                                 key={c} 
+                                 title={badge.years}
+                                 className="bg-blue-50/80 text-blue-800 text-[10px] font-bold px-2 py-0.5 rounded-lg border border-blue-100 flex flex-col items-end cursor-help hover:bg-blue-100/90 transition-all text-right w-full"
+                               >
+                                 <span>{badge.label}</span>
+                                 {badge.years && (
+                                   <span className="text-[8px] text-slate-500 font-normal leading-tight mt-0.5">
+                                     {badge.years}
+                                   </span>
+                                 )}
+                               </span>
+                             );
+                           })}
+                         </div>
+                       </div>
 
                       <div className="flex items-center justify-between pt-1">
-                        <span className="text-slate-500">التلاميذ المسجلين:</span>
+                        <span className="text-slate-500">إجمالي المسجلين بالإقليم:</span>
                         <strong className="text-emerald-700 font-bold">{registeredCount} تلميذ(ة)</strong>
                       </div>
                     </div>
@@ -712,17 +1058,59 @@ export const Tournaments: React.FC = () => {
                       className="flex-1 py-2 px-3 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-xl flex items-center justify-center gap-1.5 transition-all shadow-3xs cursor-pointer"
                     >
                       <Layers className="h-4 w-4" />
-                      <span>دخول البطولة واستعراض الفئات ({categoriesList.length})</span>
+                      <span>استعراض الفئات والبطولة ({categoriesList.length})</span>
                     </button>
 
-                    {canManageThis && (
+                    {userProfile?.role === 'TEACHER' && (
                       <button
-                        onClick={() => handleOpenProgramModal(sport.id)}
-                        title="تعديل أو إضافة فئات للبطولة"
-                        className="p-2 text-slate-500 hover:text-blue-700 hover:bg-blue-50 rounded-xl transition-colors cursor-pointer border border-slate-200 bg-white"
+                        onClick={() => navigate(`/teacher-teams?sport=${sport.id}`)}
+                        title="تسجيل وإدارة مشاركة مؤسستك"
+                        className="py-2 px-3 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl flex items-center gap-1 transition-all shadow-3xs cursor-pointer shrink-0"
                       >
-                        <Edit className="h-4 w-4" />
+                        <GraduationCap className="h-4 w-4" />
+                        <span>تسجيل مؤسستي</span>
                       </button>
+                    )}
+
+                    {canManageThis && (
+                      <div className="flex items-center gap-1.5">
+                        {isCentralAdmin && (
+                          <button
+                            onClick={() => setSportToDeleteAll({ id: sport.id, name: sport.name })}
+                            title="مسح كافة بطولات هذه الرياضة وإعادتها لحالة غير مبرمجة"
+                            className="p-2 text-red-500 hover:text-red-700 hover:bg-red-50 rounded-xl transition-colors cursor-pointer border border-red-200 bg-white flex items-center justify-center shrink-0"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        )}
+
+                        <button
+                          onClick={() => {
+                            setSelectedSportForSchedule(sport);
+                            setIsScheduleModalOpen(true);
+                          }}
+                          title="تعديل وبرمجة تواريخ البطولة وآخر أجل للتسجيل"
+                          className="py-2 px-2.5 text-amber-600 hover:text-amber-800 hover:bg-amber-50 rounded-xl transition-colors cursor-pointer border border-amber-200 bg-amber-50/60 flex items-center gap-1"
+                        >
+                          <Calendar className="h-4 w-4" />
+                          <span className="text-[11px] font-bold">برمجة التواريخ</span>
+                        </button>
+
+                        <button
+                          onClick={() => {
+                            const existing = tournaments.find(t => t.sportId === sport.id);
+                            if (existing) {
+                              setEditingTournament(existing);
+                            } else {
+                              handleOpenProgramModal(sport.id);
+                            }
+                          }}
+                          title="تعديل أو إضافة فئات للبطولة"
+                          className="p-2 text-slate-500 hover:text-blue-700 hover:bg-blue-50 rounded-xl transition-colors cursor-pointer border border-slate-200 bg-white"
+                        >
+                          <Edit className="h-4 w-4" />
+                        </button>
+                      </div>
                     )}
                   </div>
                 </div>
@@ -737,6 +1125,8 @@ export const Tournaments: React.FC = () => {
           )}
         </div>
       )}
+      </div>
+    )}
 
       {/* Create / Program Tournament Modal */}
       <CreateTournamentModal
@@ -750,6 +1140,14 @@ export const Tournaments: React.FC = () => {
         onCreated={handleCreateTournament}
       />
 
+      {/* Edit Tournament Modal */}
+      <EditTournamentModal
+        isOpen={!!editingTournament}
+        tournament={editingTournament}
+        onClose={() => setEditingTournament(null)}
+        onUpdated={loadData}
+      />
+
       {/* Confirm Delete Modal */}
       <ConfirmDeleteModal
         isOpen={!!tournamentToDelete}
@@ -761,6 +1159,17 @@ export const Tournaments: React.FC = () => {
         isDeleting={isDeleting}
       />
 
+      {/* Confirm Delete All Modal */}
+      <ConfirmDeleteModal
+        isOpen={!!sportToDeleteAll}
+        onClose={() => setSportToDeleteAll(null)}
+        onConfirm={handleConfirmDeleteAll}
+        title="مسح جميع بطولات الرياضة"
+        message="تحذير: هل أنت متأكد من رغبتك في مسح كافة الفئات والبطولات المبرمجة لهذه الرياضة نهائياً؟ سيتم إلغاء برمجتها وإعادتها لحالتها الأولية ومسح جميع البطولات المحددة لها."
+        itemName={sportToDeleteAll?.name}
+        isDeleting={isDeletingAll}
+      />
+
       {/* Cross Country Championship Unified 8 Categories Modal */}
       <CrossCountryChampionshipModal
         isOpen={isCcModalOpen}
@@ -770,6 +1179,10 @@ export const Tournaments: React.FC = () => {
         schools={schools}
         techHead={teachers.find(tch => tch.isTechCommitteeHead && (tch.techCommitteeSports?.includes('cross_country') || tch.sportId === 'cross_country'))}
         activeSeason={activeSeason}
+        canManage={canManageSport('cross_country')}
+        onRefreshData={loadData}
+        isTeacherRole={effectiveRole === 'TEACHER'}
+        teacherSchoolName={effectiveRole === 'TEACHER' && userProfile ? userProfile.workLocation : undefined}
       />
 
       {/* General Sport Championship Modal for viewing categories, controls & rosters */}
@@ -777,7 +1190,7 @@ export const Tournaments: React.FC = () => {
         isOpen={isSportModalOpen}
         onClose={() => setIsSportModalOpen(false)}
         sport={selectedSportForModal}
-        tournaments={tournaments.filter(t => t.sportId === selectedSportForModal?.id)}
+        tournaments={tournaments}
         allStudents={allStudents}
         schools={schools}
         matches={matches}
@@ -785,13 +1198,27 @@ export const Tournaments: React.FC = () => {
         activeSeason={activeSeason}
         canManage={selectedSportForModal ? canManageSport(selectedSportForModal.id) : false}
         isProgrammed={selectedSportForModal ? (
-          selectedSportForModal.id === 'cross_country' ||
-          tournaments.some(t => t.sportId === selectedSportForModal.id)
+          sportsWithTournamentData.find(item => item.sport.id === selectedSportForModal.id)?.isProgrammed || false
         ) : false}
         onProgramTournament={(sId) => {
           setIsSportModalOpen(false);
           handleOpenProgramModal(sId);
         }}
+        onRefreshData={loadData}
+        isTeacherRole={effectiveRole === 'TEACHER'}
+        teacherSchoolName={effectiveRole === 'TEACHER' && userProfile ? userProfile.workLocation : undefined}
+      />
+
+      {/* Edit Tournament Schedule & Dates Modal */}
+      <EditTournamentScheduleModal
+        isOpen={isScheduleModalOpen}
+        onClose={() => {
+          setIsScheduleModalOpen(false);
+          setSelectedSportForSchedule(null);
+        }}
+        sport={selectedSportForSchedule}
+        tournaments={tournaments}
+        onUpdated={loadData}
       />
     </div>
   );

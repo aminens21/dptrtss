@@ -1,7 +1,8 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo, useRef } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import { DataService, SPORTS_MAP, deduplicateById } from '../lib/dataService';
-import { School, Match } from '../types';
+import { DataService, SPORTS_MAP, AGE_CATEGORIES, deduplicateById } from '../lib/dataService';
+import { School, Match, Directorate } from '../types';
+import * as XLSX from 'xlsx';
 import {
   Plus,
   Search,
@@ -16,7 +17,16 @@ import {
   Filter,
   CheckCircle2,
   Building2,
-  GraduationCap
+  GraduationCap,
+  FileSpreadsheet,
+  Download,
+  Upload,
+  ShieldCheck,
+  LayoutGrid,
+  List,
+  FileText,
+  ChevronDown,
+  Check
 } from 'lucide-react';
 import { CreateSchoolModal } from '../components/CreateSchoolModal';
 import { ConfirmDeleteModal } from '../components/ConfirmDeleteModal';
@@ -25,7 +35,9 @@ import toast from 'react-hot-toast';
 
 export const Schools: React.FC = () => {
   const { userProfile } = useAuth();
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [schools, setSchools] = useState<School[]>([]);
+  const [activeDirObj, setActiveDirObj] = useState<Directorate | null>(null);
   const [matches, setMatches] = useState<Match[]>([]);
   const [students, setStudents] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -33,6 +45,10 @@ export const Schools: React.FC = () => {
   const [typeFilter, setTypeFilter] = useState<string>('ALL');
   const [communeFilter, setCommuneFilter] = useState<string>('ALL');
   const [selectedSport, setSelectedSport] = useState<string>('ALL');
+  const [selectedSchoolFilter, setSelectedSchoolFilter] = useState<string>('ALL');
+  const [schoolSelectQuery, setSchoolSelectQuery] = useState<string>('');
+  const [isSchoolDropdownOpen, setIsSchoolDropdownOpen] = useState<boolean>(false);
+  const [viewMode, setViewMode] = useState<'cards' | 'table'>('cards');
 
   // Modals state
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -41,7 +57,7 @@ export const Schools: React.FC = () => {
   const [isDeleting, setIsDeleting] = useState(false);
   const [selectedSchoolForParticipants, setSelectedSchoolForParticipants] = useState<School | null>(null);
 
-  // CENTRAL_ADMIN, SPORT_MANAGER, and Technical Committee Head (رئيس اللجنة التقنية) can manage participating schools and principal phone
+  // CENTRAL_ADMIN, SPORT_MANAGER, and Technical Committee Head can manage schools
   const isTechCommitteeHead = !!userProfile?.isTechCommitteeHead;
   const canManage = userProfile?.role === 'CENTRAL_ADMIN' || 
                     userProfile?.role === 'SPORT_MANAGER' || 
@@ -74,28 +90,45 @@ export const Schools: React.FC = () => {
     return 'ALL';
   }, [userProfile]);
 
-  // Set initial selected sport to user preferred specialty upon login/data load
-  useEffect(() => {
-    if (preferredSportId && preferredSportId !== 'ALL') {
-      setSelectedSport(preferredSportId);
-    }
-  }, [preferredSportId]);
+  // Default selected sport is 'ALL' so all institutions are visible when entering the page
+  // (We do not auto-force selectedSport to preferredSportId to avoid unintentionally hiding institutions)
 
   useEffect(() => {
     loadSchools();
+    const handleDirChanged = () => {
+      loadSchools();
+    };
+    window.addEventListener('directorateChanged', handleDirChanged);
+    return () => {
+      window.removeEventListener('directorateChanged', handleDirChanged);
+    };
   }, []);
 
   const loadSchools = async () => {
     setLoading(true);
     try {
-      const [list, mList, studList] = await Promise.all([
+      const activeDirId = DataService.getActiveDirectorateId();
+      const [list, mList, studList, activeDir] = await Promise.all([
         DataService.getSchools(),
         DataService.getMatches(),
-        DataService.getStudents()
+        DataService.getStudents(),
+        DataService.getActiveDirectorate()
       ]);
-      setSchools(deduplicateById<School>(list));
-      setMatches(mList);
-      setStudents(studList);
+
+      const dirSchools = list.filter(s => 
+        s && 
+        s.name && 
+        !s.name.includes('الكندي') && 
+        !s.name.includes('غير محدد') && 
+        (s.directorateId === activeDirId || (!s.directorateId && activeDirId === 'taourirt'))
+      );
+      const dirMatches = mList.filter(m => (m.directorateId || 'taourirt') === activeDirId);
+      const dirStudents = studList.filter(st => (st.directorateId || 'taourirt') === activeDirId);
+
+      setActiveDirObj(activeDir);
+      setSchools(deduplicateById<School>(dirSchools));
+      setMatches(dirMatches);
+      setStudents(dirStudents);
     } catch (e) {
       console.error(e);
       toast.error('تعذر تحميل لائحة المؤسسات والفرق');
@@ -106,13 +139,15 @@ export const Schools: React.FC = () => {
 
   const handleSaveSchool = async (schoolData: Omit<School, 'id'>) => {
     try {
+      const activeDirId = DataService.getActiveDirectorateId();
+      const fullSchoolData = { ...schoolData, directorateId: activeDirId };
       if (editingSchool) {
-        await DataService.updateSchool(editingSchool.id, schoolData);
-        setSchools(prev => deduplicateById<School>(prev.map(s => s.id === editingSchool.id ? { ...s, ...schoolData } : s)));
+        await DataService.updateSchool(editingSchool.id, fullSchoolData);
+        setSchools(prev => deduplicateById<School>(prev.map(s => s.id === editingSchool.id ? { ...s, ...fullSchoolData } : s)));
         toast.success('تم تحديث بيانات المؤسسة بنجاح');
         setEditingSchool(null);
       } else {
-        const created = await DataService.addSchool(schoolData);
+        const created = await DataService.addSchool(fullSchoolData);
         setSchools(prev => deduplicateById<School>([created, ...prev]));
         toast.success('تمت إضافة المؤسسة التعليمية بنجاح');
       }
@@ -136,6 +171,232 @@ export const Schools: React.FC = () => {
     }
   };
 
+  const handleDownloadExcelTemplate = () => {
+    try {
+      const headers = [
+        'اسم المؤسسة التعليمية *',
+        'السلك التعليمي (تأهيلي / إعدادي / ابتدائي)',
+        'الجماعة / الدائرة',
+        'اسم المنسق (أستاذ التربية البدنية)',
+        'هاتف المنسق',
+        'اسم مدير المؤسسة',
+        'هاتف مدير المؤسسة'
+      ];
+
+      const sampleRows = [
+        [
+          'ثانوية الفتح التأهيلية',
+          'تأهيلي',
+          'تاوريرت المركز',
+          'ذ. عبد الرحيم بلقاسم',
+          '0661234567',
+          'ذ. محمد اليعقوبي',
+          '0661998877'
+        ],
+        [
+          'إعدادية ابن سينا',
+          'إعدادي',
+          'تاوريرت',
+          'ذة. فاطمة الزهراء بنعلي',
+          '0663456789',
+          'ذ. حسن المنصوري',
+          '0663776655'
+        ],
+        [
+          'مجموعة مدارس دبدو',
+          'ابتدائي',
+          'دبدو',
+          'ذ. يوسف المراكشي',
+          '0665678901',
+          'ذ. عبد القادر الفاسي',
+          '0665554433'
+        ]
+      ];
+
+      const wsData = [headers, ...sampleRows];
+      const ws = XLSX.utils.aoa_to_sheet(wsData);
+
+      ws['!cols'] = [
+        { wch: 35 },
+        { wch: 25 },
+        { wch: 20 },
+        { wch: 30 },
+        { wch: 18 },
+        { wch: 25 },
+        { wch: 18 }
+      ];
+
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'المؤسسات التعليمية');
+      XLSX.writeFile(wb, 'نموذج_تعبئة_المؤسسات_التعليمية_مديرية_تاوريرت.xlsx');
+      toast.success('تم تحميل نموذج Excel بنجاح. يرجى تعبئته بمعلومات مؤسسات الإقليم ثم استيراده.');
+    } catch (err) {
+      console.error('Error downloading template:', err);
+      toast.error('حدث خطأ أثناء تنزيل نموذج الإكسيل');
+    }
+  };
+
+  const handleImportExcel = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const toastId = toast.loading('جاري قراءة ملف Excel واستيراد المؤسسات التعليمية...');
+    try {
+      const buffer = await file.arrayBuffer();
+      const wb = XLSX.read(buffer, { type: 'array' });
+      const firstSheetName = wb.SheetNames[0];
+      const ws = wb.Sheets[firstSheetName];
+      const jsonData: any[] = XLSX.utils.sheet_to_json(ws, { defval: '' });
+
+      if (!jsonData || jsonData.length === 0) {
+        toast.error('الملف فارغ أو لا يحتوي على بيانات صالحة', { id: toastId });
+        return;
+      }
+
+      const parsedSchools: Omit<School, 'id'>[] = [];
+
+      for (const row of jsonData) {
+        const schoolName = (
+          row['اسم المؤسسة التعليمية *'] ||
+          row['اسم المؤسسة التعليمية'] ||
+          row['اسم المؤسسة'] ||
+          row['المؤسسة'] ||
+          row['المؤسسة التعليمية'] ||
+          row['School'] ||
+          row['name'] ||
+          ''
+        ).toString().trim();
+
+        if (!schoolName || schoolName.startsWith('#') || schoolName.includes('اسم المؤسسة')) {
+          continue;
+        }
+
+        const rawType = (
+          row['السلك التعليمي (تأهيلي / إعدادي / ابتدائي)'] ||
+          row['السلك التعليمي'] ||
+          row['السلك'] ||
+          row['النوع'] ||
+          row['type'] ||
+          'تأهيلي'
+        ).toString().trim();
+
+        let normalizedType = 'تأهيلي';
+        if (rawType.includes('إعداد') || rawType.includes('اعداد')) {
+          normalizedType = 'إعدادي';
+        } else if (rawType.includes('ابتدائ')) {
+          normalizedType = 'ابتدائي';
+        } else {
+          normalizedType = 'تأهيلي';
+        }
+
+        const commune = (
+          row['الجماعة / الدائرة'] ||
+          row['الجماعة'] ||
+          row['الدائرة'] ||
+          row['المدينة'] ||
+          row['commune'] ||
+          'تاوريرت المركز'
+        ).toString().trim();
+
+        const coordinatorName = (
+          row['اسم المنسق (أستاذ التربية البدنية)'] ||
+          row['اسم المنسق'] ||
+          row['المنسق'] ||
+          row['أستاذ التربية البدنية المنسق'] ||
+          row['المؤطر'] ||
+          row['اسم المؤطر'] ||
+          row['teacherName'] ||
+          'منسق المادة'
+        ).toString().trim();
+
+        const phone = (
+          row['هاتف المنسق'] ||
+          row['هاتف المؤطر'] ||
+          row['الهاتف'] ||
+          row['phone'] ||
+          ''
+        ).toString().trim();
+
+        const principalName = (
+          row['اسم مدير المؤسسة'] ||
+          row['اسم المدير'] ||
+          row['المدير'] ||
+          row['principalName'] ||
+          ''
+        ).toString().trim();
+
+        const principalPhone = (
+          row['هاتف مدير المؤسسة'] ||
+          row['هاتف المدير'] ||
+          row['principalPhone'] ||
+          ''
+        ).toString().trim();
+
+        parsedSchools.push({
+          name: schoolName,
+          type: normalizedType,
+          commune: commune || 'تاوريرت المركز',
+          teacherName: coordinatorName,
+          coordinatorName: coordinatorName,
+          phone: phone || undefined,
+          principalName: principalName || undefined,
+          principalPhone: principalPhone || undefined
+        });
+      }
+
+      if (parsedSchools.length === 0) {
+        toast.error('لم يتم العثور على أي صفوف صالحة للمؤسسات في ملف Excel المرفوع.', { id: toastId });
+        return;
+      }
+
+      await DataService.addSchoolsBulk(parsedSchools);
+      await loadSchools();
+      toast.success(`تم بنجاح استيراد وتحديث ${parsedSchools.length} مؤسسة تعليمية بمديرية تاوريرت!`, { id: toastId });
+    } catch (err) {
+      console.error('Error importing Excel:', err);
+      toast.error('حدث خطأ أثناء معالجة ملف Excel، يرجى التأكد من التنسيق وإعادة المحاولة', { id: toastId });
+    } finally {
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+    }
+  };
+
+  const handleExportCurrentSchools = () => {
+    try {
+      const exportData = schools.map((s, idx) => ({
+        'الرقم': idx + 1,
+        'اسم المؤسسة التعليمية': s.name,
+        'السلك التعليمي': s.type === 'تأهيلي' ? 'ثانوي تأهيلي' : s.type === 'إعدادي' ? 'ثانوي إعدادي' : 'ابتدائي',
+        'الجماعة / الدائرة': s.commune,
+        'المنسق (أستاذ التربية البدنية)': s.coordinatorName || s.teacherName,
+        'هاتف المنسق': s.phone || '',
+        'اسم مدير المؤسسة': s.principalName || '',
+        'هاتف مدير المؤسسة': s.principalPhone || ''
+      }));
+
+      const ws = XLSX.utils.json_to_sheet(exportData);
+      ws['!cols'] = [
+        { wch: 8 },
+        { wch: 35 },
+        { wch: 20 },
+        { wch: 20 },
+        { wch: 30 },
+        { wch: 18 },
+        { wch: 25 },
+        { wch: 18 }
+      ];
+
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'المؤسسات التعليمية تاوريرت');
+      XLSX.writeFile(wb, 'المؤسسات_التعليمية_مديرية_تاوريرت.xlsx');
+      toast.success(`تم تصدير ${schools.length} مؤسسة تعليمية إلى Excel بنجاح!`);
+    } catch (err) {
+      console.error('Error exporting schools:', err);
+      toast.error('حدث خطأ أثناء تصدير البيانات إلى Excel');
+    }
+  };
+
   const participatingSchoolIdsForSport = useMemo(() => {
     if (selectedSport === 'ALL') return null;
 
@@ -152,10 +413,12 @@ export const Schools: React.FC = () => {
     // 2. Schools with registered students in this sport
     students.forEach(s => {
       if (s.sportId === selectedSport) {
-        // Find school by name or schoolId
-        const school = schools.find(sch => sch.id === s.schoolId || sch.name === s.schoolName);
+        if (s.schoolId) ids.add(s.schoolId);
+        if (s.schoolName) ids.add(s.schoolName.trim().toLowerCase());
+        const school = schools.find(sch => sch.id === s.schoolId || sch.name.trim().toLowerCase() === s.schoolName?.trim().toLowerCase());
         if (school) {
           ids.add(school.id);
+          ids.add(school.name.trim().toLowerCase());
         }
       }
     });
@@ -164,15 +427,22 @@ export const Schools: React.FC = () => {
   }, [selectedSport, matches, students, schools]);
 
   const filtered = schools.filter(s => {
+    const coordinatorStr = (s.coordinatorName || s.teacherName || '').toLowerCase();
+    const principalStr = (s.principalName || '').toLowerCase();
     const matchSearch = s.name.toLowerCase().includes(search.toLowerCase()) ||
                         s.commune.toLowerCase().includes(search.toLowerCase()) ||
-                        s.teacherName.toLowerCase().includes(search.toLowerCase()) ||
+                        coordinatorStr.includes(search.toLowerCase()) ||
+                        principalStr.includes(search.toLowerCase()) ||
                         (s.phone || '').includes(search) ||
                         (s.principalPhone || '').includes(search);
     const matchType = typeFilter === 'ALL' || s.type === typeFilter;
     const matchCommune = communeFilter === 'ALL' || s.commune.includes(communeFilter);
-    const matchSport = selectedSport === 'ALL' || (participatingSchoolIdsForSport && participatingSchoolIdsForSport.has(s.id));
-    return matchSearch && matchType && matchCommune && matchSport;
+    const matchSport = selectedSport === 'ALL' || (participatingSchoolIdsForSport && (
+      participatingSchoolIdsForSport.has(s.id) || 
+      participatingSchoolIdsForSport.has(s.name.trim().toLowerCase())
+    ));
+    const matchSchool = selectedSchoolFilter === 'ALL' || s.id === selectedSchoolFilter || s.name === selectedSchoolFilter;
+    return matchSearch && matchType && matchCommune && matchSport && matchSchool;
   });
 
   const highSchoolsCount = schools.filter(s => s.type === 'تأهيلي').length;
@@ -181,32 +451,77 @@ export const Schools: React.FC = () => {
 
   return (
     <div className="space-y-4" dir="rtl">
+      {/* Hidden file input for Excel upload */}
+      <input
+        type="file"
+        ref={fileInputRef}
+        onChange={handleImportExcel}
+        accept=".xlsx, .xls, .csv"
+        className="hidden"
+      />
+
       {/* Top Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white p-4 md:p-5 rounded-xl border border-slate-200 shadow-xs">
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 bg-white p-4 md:p-5 rounded-xl border border-slate-200 shadow-xs">
         <div>
           <div className="flex items-center gap-2">
-            <h2 className="text-base md:text-lg font-bold text-slate-800">دليل المؤسسات والفرق المشاركة</h2>
+            <h2 className="text-base md:text-lg font-bold text-slate-800">دليل المؤسسات التعليمية</h2>
             <span className="text-[10px] bg-blue-50 text-blue-700 font-bold px-2 py-0.5 rounded border border-blue-200">
-              مديرية تاوريرت
+              {activeDirObj?.name || 'المديرية الإقليمية'}
             </span>
           </div>
           <p className="text-xs text-slate-500 font-medium mt-0.5">
-            قائمة المؤسسات التعليمية (تأهيلي، إعدادي، ابتدائي) والأساتذة المؤطرين للفرق الرياضية
+            قائمة المؤسسات التعليمية والمنسقين والإدارة التربوية لـ {activeDirObj?.name || 'المديرية الإقليمية'}
           </p>
         </div>
 
-        {canManage && (
+        {/* Action Buttons */}
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Download blank Excel template */}
           <button
-            onClick={() => {
-              setEditingSchool(null);
-              setIsModalOpen(true);
-            }}
-            className="inline-flex items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-xs font-bold text-white shadow-xs hover:bg-blue-700 transition-colors cursor-pointer"
+            onClick={handleDownloadExcelTemplate}
+            title="تحميل نموذج إكسيل فارغ لتعبئة مؤسسات الإقليم"
+            className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-2 text-xs font-bold text-emerald-800 hover:bg-emerald-100 transition-colors shadow-2xs cursor-pointer"
           >
-            <Plus className="h-4 w-4" />
-            <span>إضافة مؤسسة مشاركة</span>
+            <Download className="h-3.5 w-3.5 text-emerald-700" />
+            <span>تحميل نموذج Excel فارغ</span>
           </button>
-        )}
+
+          {/* Import Excel */}
+          {canManage && (
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              title="استيراد وتعبئة المؤسسات التعليمية من ملف إكسيل"
+              className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-indigo-300 bg-indigo-50 px-3 py-2 text-xs font-bold text-indigo-800 hover:bg-indigo-100 transition-colors shadow-2xs cursor-pointer"
+            >
+              <Upload className="h-3.5 w-3.5 text-indigo-700" />
+              <span>استيراد من Excel</span>
+            </button>
+          )}
+
+          {/* Export current schools */}
+          <button
+            onClick={handleExportCurrentSchools}
+            title="تصدير القائمة الحالية للمؤسسات التعليمية إلى ملف إكسيل"
+            className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-bold text-slate-700 hover:bg-slate-100 transition-colors shadow-2xs cursor-pointer"
+          >
+            <FileSpreadsheet className="h-3.5 w-3.5 text-slate-600" />
+            <span>تصدير إلى Excel</span>
+          </button>
+
+          {/* Manual Add School */}
+          {canManage && (
+            <button
+              onClick={() => {
+                setEditingSchool(null);
+                setIsModalOpen(true);
+              }}
+              className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-blue-600 px-3.5 py-2 text-xs font-bold text-white shadow-xs hover:bg-blue-700 transition-colors cursor-pointer"
+            >
+              <Plus className="h-4 w-4" />
+              <span>إضافة مؤسسة تعليمية</span>
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Quick Stats */}
@@ -254,11 +569,88 @@ export const Schools: React.FC = () => {
           <Search className="h-4 w-4 text-slate-400 ml-2 shrink-0" />
           <input
             type="text"
-            placeholder="ابحث باسم المؤسسة، الجماعة، أو الأستاذ المؤطر..."
+            placeholder="ابحث باسم المؤسسة، الجماعة، المنسق، أو المدير..."
             className="w-full border-0 focus:ring-0 text-xs py-1 text-slate-800 placeholder-slate-400 focus:outline-none"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
+        </div>
+
+        {/* School Search Filter Dropdown */}
+        <div className="relative flex items-center gap-2 w-full lg:w-auto border-t lg:border-t-0 lg:border-r border-slate-100 pt-2 lg:pt-0 lg:pr-3 shrink-0">
+          <label className="text-xs font-bold text-slate-600 whitespace-nowrap flex items-center gap-1.5">
+            <SchoolIcon className="h-3.5 w-3.5 text-emerald-600" />
+            <span>المؤسسة:</span>
+          </label>
+          <div className="relative min-w-[200px] w-full lg:w-auto">
+            <button
+              type="button"
+              onClick={() => setIsSchoolDropdownOpen(!isSchoolDropdownOpen)}
+              className="flex justify-between items-center w-full rounded-lg border border-slate-200 px-3 py-1.5 text-slate-700 text-xs font-bold bg-slate-50 hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer text-right"
+            >
+              <span className="truncate max-w-[150px]">
+                {selectedSchoolFilter === 'ALL' 
+                  ? '🏫 جميع المؤسسات' 
+                  : (schools.find(sch => sch.id === selectedSchoolFilter || sch.name === selectedSchoolFilter)?.name || selectedSchoolFilter)}
+              </span>
+              <ChevronDown className="h-3.5 w-3.5 text-slate-400 shrink-0 mr-1" />
+            </button>
+
+            {isSchoolDropdownOpen && (
+              <>
+                <div className="fixed inset-0 z-40" onClick={() => setIsSchoolDropdownOpen(false)} />
+                <div className="absolute right-0 lg:left-0 z-50 mt-1 bg-white rounded-xl border border-slate-200 shadow-lg overflow-hidden min-w-[250px]">
+                  <div className="relative p-2 border-b border-slate-100 bg-slate-50/50 flex items-center">
+                    <Search className="absolute right-4.5 h-3.5 w-3.5 text-slate-400 pointer-events-none" />
+                    <input
+                      type="text"
+                      value={schoolSelectQuery}
+                      onChange={(e) => setSchoolSelectQuery(e.target.value)}
+                      className="w-full pr-8 pl-3 py-1.5 text-xs font-bold bg-white border border-slate-200 rounded-lg focus:outline-none focus:border-blue-500 text-slate-700"
+                      placeholder="ابحث باسم المؤسسة..."
+                      autoFocus
+                    />
+                  </div>
+                  <div className="max-h-60 overflow-y-auto divide-y divide-slate-50">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedSchoolFilter('ALL');
+                        setIsSchoolDropdownOpen(false);
+                        setSchoolSelectQuery('');
+                      }}
+                      className="flex items-center justify-between w-full px-3 py-2 text-right text-xs font-bold text-slate-700 hover:bg-slate-50 transition-colors cursor-pointer"
+                    >
+                      <span>🏫 جميع المؤسسات</span>
+                      {selectedSchoolFilter === 'ALL' && <Check className="h-3.5 w-3.5 text-emerald-600 shrink-0" />}
+                    </button>
+                    {[...schools]
+                      .sort((a, b) => a.name.localeCompare(b.name, 'ar'))
+                      .filter(sch => 
+                        !schoolSelectQuery || 
+                        sch.name.toLowerCase().includes(schoolSelectQuery.toLowerCase())
+                      )
+                      .map(sch => (
+                        <button
+                          key={sch.id}
+                          type="button"
+                          onClick={() => {
+                            setSelectedSchoolFilter(sch.id);
+                            setIsSchoolDropdownOpen(false);
+                            setSchoolSelectQuery('');
+                          }}
+                          className="flex items-center justify-between w-full px-3 py-2 text-right text-xs font-bold text-slate-700 hover:bg-slate-50 transition-colors cursor-pointer"
+                        >
+                          <span className="truncate max-w-[200px]">{sch.name}</span>
+                          {selectedSchoolFilter === sch.id && <Check className="h-3.5 w-3.5 text-emerald-600 shrink-0" />}
+                        </button>
+                      ))
+                    }
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
         </div>
 
         {/* Sport Filter Dropdown */}
@@ -282,25 +674,57 @@ export const Schools: React.FC = () => {
           </select>
         </div>
 
-        <div className="flex items-center gap-1.5 overflow-x-auto w-full sm:w-auto pb-1 sm:pb-0">
-          {[
-            { id: 'ALL', label: `الكل (${schools.length})` },
-            { id: 'تأهيلي', label: 'تأهيلي' },
-            { id: 'إعدادي', label: 'إعدادي' },
-            { id: 'ابتدائي', label: 'ابتدائي' },
-          ].map(f => (
+        <div className="flex items-center justify-between gap-2 w-full sm:w-auto overflow-x-auto pb-1 sm:pb-0">
+          <div className="flex items-center gap-1.5">
+            {[
+              { id: 'ALL', label: `الكل (${schools.length})` },
+              { id: 'تأهيلي', label: 'تأهيلي' },
+              { id: 'إعدادي', label: 'إعدادي' },
+              { id: 'ابتدائي', label: 'ابتدائي' },
+            ].map(f => (
+              <button
+                key={f.id}
+                onClick={() => setTypeFilter(f.id)}
+                className={`px-3 py-1.5 text-xs font-bold rounded-lg whitespace-nowrap transition-colors cursor-pointer ${
+                  typeFilter === f.id
+                    ? 'bg-slate-900 text-white shadow-xs'
+                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                }`}
+              >
+                {f.label}
+              </button>
+            ))}
+          </div>
+
+          {/* Cards vs Table View Switcher */}
+          <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-lg border border-slate-200 shrink-0 mr-2">
             <button
-              key={f.id}
-              onClick={() => setTypeFilter(f.id)}
-              className={`px-3 py-1.5 text-xs font-bold rounded-lg whitespace-nowrap transition-colors cursor-pointer ${
-                typeFilter === f.id
-                  ? 'bg-slate-900 text-white shadow-xs'
-                  : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+              type="button"
+              onClick={() => setViewMode('cards')}
+              title="عرض المؤسسات على شكل بطائق"
+              className={`p-1.5 rounded-md text-xs font-bold transition-all flex items-center gap-1 cursor-pointer ${
+                viewMode === 'cards'
+                  ? 'bg-white text-blue-700 shadow-xs border border-slate-200 font-black'
+                  : 'text-slate-600 hover:text-slate-900'
               }`}
             >
-              {f.label}
+              <LayoutGrid className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">بطائق 📇</span>
             </button>
-          ))}
+            <button
+              type="button"
+              onClick={() => setViewMode('table')}
+              title="عرض المؤسسات على شكل جدول"
+              className={`p-1.5 rounded-md text-xs font-bold transition-all flex items-center gap-1 cursor-pointer ${
+                viewMode === 'table'
+                  ? 'bg-white text-blue-700 shadow-xs border border-slate-200 font-black'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <List className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">جدول 📊</span>
+            </button>
+          </div>
         </div>
       </div>
 
@@ -323,10 +747,118 @@ export const Schools: React.FC = () => {
         </div>
       )}
 
-      {/* School Cards Grid */}
+      {/* School Cards Grid or Table View */}
       {loading ? (
         <div className="flex justify-center p-12">
           <div className="h-7 w-7 animate-spin rounded-full border-3 border-blue-600 border-t-transparent"></div>
+        </div>
+      ) : viewMode === 'table' ? (
+        <div className="space-y-2">
+          {/* Mobile horizontal scroll banner indicator */}
+          <div className="sm:hidden flex items-center justify-between p-2 bg-blue-50/80 border border-blue-200 rounded-lg text-[11px] text-blue-900">
+            <span className="flex items-center gap-1 font-bold">
+              <span>↔️</span>
+              <span>اسحب الجدول أفقياً للاطلاع على جميع الأعمدة والتفاصيل</span>
+            </span>
+          </div>
+
+          <div className="bg-white rounded-xl border border-slate-200 shadow-xs overflow-x-auto">
+            {filtered.length > 0 ? (
+              <table className="w-full text-right border-collapse min-w-[880px]">
+                <thead>
+                  <tr className="bg-slate-900 text-white text-xs font-black">
+                    <th className="p-3 border-b border-slate-800 w-12 text-center">#</th>
+                    <th className="p-3 border-b border-slate-800 min-w-[200px]">اسم المؤسسة التعليمية</th>
+                    <th className="p-3 border-b border-slate-800 w-24">السلك</th>
+                    <th className="p-3 border-b border-slate-800 min-w-[120px]">الجماعة</th>
+                    <th className="p-3 border-b border-slate-800 min-w-[140px]">الأستاذ المنسق</th>
+                    <th className="p-3 border-b border-slate-800 w-28">هاتف المنسق</th>
+                    <th className="p-3 border-b border-slate-800 min-w-[150px]">مدير المؤسسة</th>
+                    <th className="p-3 border-b border-slate-800 text-center w-24">المشاركون</th>
+                    <th className="p-3 border-b border-slate-800 text-center min-w-[180px]">الإجراءات والمشاركات</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 text-xs">
+                  {filtered.map((s, idx) => {
+                    const schoolStudentsForSport = students.filter(
+                      stud => (stud.schoolId === s.id || stud.schoolName === s.name) && (selectedSport === 'ALL' || stud.sportId === selectedSport)
+                    );
+                    const count = schoolStudentsForSport.length;
+
+                    return (
+                      <tr key={s.id} className="hover:bg-slate-50/90 transition-colors">
+                        <td className="p-3 font-mono font-bold text-slate-400 text-center">{idx + 1}</td>
+                        <td className="p-3 font-bold text-slate-900">{s.name}</td>
+                        <td className="p-3">
+                          <span className={`inline-block text-[10px] font-bold px-2 py-0.5 rounded border ${
+                            s.type === 'تأهيلي' ? 'bg-blue-50 text-blue-700 border-blue-200' :
+                            s.type === 'إعدادي' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' :
+                            'bg-amber-50 text-amber-700 border-amber-200'
+                          }`}>
+                            {s.type}
+                          </span>
+                        </td>
+                        <td className="p-3 text-slate-600 font-medium">{s.commune}</td>
+                        <td className="p-3 font-bold text-slate-800">{s.coordinatorName || s.teacherName || '—'}</td>
+                        <td className="p-3 font-mono text-slate-700" dir="ltr">{s.phone || '—'}</td>
+                        <td className="p-3 font-medium text-amber-900">
+                          {s.principalName || '—'}{' '}
+                          {s.principalPhone && (
+                            <span className="text-[10px] font-mono text-amber-800 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200 font-bold inline-block mt-0.5" dir="ltr">
+                              {s.principalPhone}
+                            </span>
+                          )}
+                        </td>
+                        <td className="p-3 text-center">
+                          <span className="inline-flex items-center gap-1 font-mono font-black text-blue-700 bg-blue-50 px-2.5 py-1 rounded-lg border border-blue-200">
+                            <Users className="w-3 h-3 text-blue-600" />
+                            {count}
+                          </span>
+                        </td>
+                        <td className="p-3">
+                          <div className="flex items-center justify-center gap-2">
+                            <button
+                              onClick={() => setSelectedSchoolForParticipants(s)}
+                              className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg text-[11px] transition-colors flex items-center gap-1 cursor-pointer shadow-2xs"
+                            >
+                              <span>عرض المشاركات واللائحة</span>
+                              <FileText className="w-3.5 h-3.5" />
+                            </button>
+                            {canManage && (
+                              <>
+                                <button
+                                  onClick={() => {
+                                    setEditingSchool(s);
+                                    setIsModalOpen(true);
+                                  }}
+                                  className="p-1 text-slate-400 hover:text-blue-600 rounded hover:bg-blue-50 transition-colors cursor-pointer"
+                                  title="تعديل المؤسسة"
+                                >
+                                  <Edit3 className="h-3.5 w-3.5" />
+                                </button>
+                                <button
+                                  onClick={() => setSchoolToDelete(s)}
+                                  className="p-1 text-slate-400 hover:text-red-600 rounded hover:bg-red-50 transition-colors cursor-pointer"
+                                  title="حذف المؤسسة"
+                                >
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                </button>
+                              </>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            ) : (
+              <div className="flex flex-col items-center justify-center p-12 text-slate-500 bg-white rounded-xl text-center">
+                <SchoolIcon className="h-10 w-10 text-slate-300 mb-3" />
+                <p className="text-sm font-bold text-slate-700 mb-1">لا توجد مؤسسات مطابقة</p>
+              </div>
+            )}
+          </div>
         </div>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5">
@@ -399,19 +931,90 @@ export const Schools: React.FC = () => {
                         <span>{s.commune}</span>
                       </div>
                       <div className="flex items-center gap-1.5 font-medium text-slate-700">
-                        <User className="h-3.5 w-3.5 text-blue-600" />
-                        <span>المؤطر: {s.teacherName}</span>
+                        <User className="h-3.5 w-3.5 text-blue-600 shrink-0" />
+                        <span>المنسق: {s.coordinatorName || s.teacherName}</span>
+                      </div>
+                      <div className="flex items-center gap-1.5 font-medium text-amber-900">
+                        <ShieldCheck className="h-3.5 w-3.5 text-amber-600 shrink-0" />
+                        <span>المدير: {s.principalName || 'غير مسجل'}</span>
                       </div>
                     </div>
+
+                    {/* Participation Preview (البطولات والفئات والأصناف المشاركة فقط) */}
+                    {(() => {
+                      const schoolStudentsAll = students.filter(
+                        stud => stud.schoolId === s.id || stud.schoolName === s.name
+                      );
+                      const participatedSportKeys = Array.from(new Set(schoolStudentsAll.map(st => st.sportId).filter(Boolean)));
+                      const participatedCatKeys = Array.from(new Set(schoolStudentsAll.map(st => st.category).filter(Boolean)));
+                      const hasClub = schoolStudentsAll.some(st => st.affiliationType === 'club_affiliated');
+                      const hasSchoolOnly = schoolStudentsAll.some(st => st.affiliationType !== 'club_affiliated');
+
+                      if (participatedSportKeys.length === 0) {
+                        return (
+                          <div className="mt-2.5 px-2.5 py-1.5 bg-slate-50 rounded-lg border border-slate-200 text-[10px] text-slate-400 font-medium">
+                            لم تسجل هذه المؤسسة مشاركات بعد
+                          </div>
+                        );
+                      }
+
+                      return (
+                        <div className="mt-2.5 p-2 bg-blue-50/70 rounded-xl border border-blue-100 space-y-1 text-[11px]">
+                          {/* Sports */}
+                          <div className="flex items-center gap-1 flex-wrap">
+                            <span className="font-black text-blue-950 text-[10px]">البطولات:</span>
+                            {participatedSportKeys.map(sKey => {
+                              const sp = SPORTS_MAP[sKey as string];
+                              return (
+                                <span key={sKey} className="px-1.5 py-0.5 bg-white text-blue-900 font-bold border border-blue-200 rounded-md text-[10px] flex items-center gap-1 shadow-3xs">
+                                  <span>{sp?.icon || '🏆'}</span>
+                                  <span>{sp?.name || sKey}</span>
+                                </span>
+                              );
+                            })}
+                          </div>
+
+                          {/* Categories */}
+                          {participatedCatKeys.length > 0 && (
+                            <div className="flex items-center gap-1 flex-wrap pt-0.5">
+                              <span className="font-black text-slate-700 text-[10px]">الفئات:</span>
+                              {participatedCatKeys.map(cKey => {
+                                const cat = AGE_CATEGORIES.find(c => c.id === cKey);
+                                return (
+                                  <span key={cKey} className="px-1.5 py-0.5 bg-emerald-50 text-emerald-900 font-bold border border-emerald-200 rounded-md text-[10px]">
+                                    {cat ? cat.shortName : cKey}
+                                  </span>
+                                );
+                              })}
+                            </div>
+                          )}
+
+                          {/* Classes */}
+                          <div className="flex items-center gap-1 flex-wrap text-[10px] pt-0.5">
+                            <span className="font-black text-slate-700">الأصناف:</span>
+                            {hasSchoolOnly && (
+                              <span className="px-1.5 py-0.5 bg-white text-slate-800 font-bold border border-slate-300 rounded-md">
+                                ⚪ غير منتمين
+                              </span>
+                            )}
+                            {hasClub && (
+                              <span className="px-1.5 py-0.5 bg-amber-100 text-amber-950 font-bold border border-amber-300 rounded-md">
+                                🟡 منتمين للأندية
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })()}
                   </div>
 
                   <div className="space-y-1.5 pt-1">
-                    {/* Teacher Phone */}
+                    {/* Coordinator Phone */}
                     {s.phone && (
                       <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-[11px]">
                         <span className="text-slate-500 font-medium flex items-center gap-1">
-                          <User className="h-3 w-3 text-blue-500" />
-                          <span>هاتف المؤطر:</span>
+                          <Phone className="h-3 w-3 text-blue-500" />
+                          <span>هاتف المنسق:</span>
                         </span>
                         <a
                           href={`tel:${s.phone}`}

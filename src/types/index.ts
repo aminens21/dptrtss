@@ -1,5 +1,43 @@
 export type Role = 'CENTRAL_ADMIN' | 'SPORT_MANAGER' | 'TEACHER' | 'REFEREE';
 
+export const SUPER_ADMIN_EMAILS = [
+  'aminens21@gmail.com',
+  'printomrdesigne@gmail.com'
+];
+
+export interface Directorate {
+  id: string;
+  name: string; // e.g. 'المديرية الإقليمية بتاوريرت'
+  shortName: string; // e.g. 'تاوريرت'
+  region: string; // e.g. 'جهة الشرق'
+  code: string; // e.g. '123456' or 'TAO2026' - PIN needed for teachers/staff to join this directorate
+  adminEmails: string[]; // Central admins who manage this specific directorate
+  logoUrl?: string;
+  phone?: string;
+  email?: string;
+  address?: string;
+  isActive: boolean;
+  createdAt?: any;
+}
+
+export interface DirectorateTransferRequest {
+  targetDirectorateId: string;
+  targetDirectorateName: string;
+  targetDirectorateRegion?: string;
+  currentDirectorateId: string;
+  currentDirectorateName: string;
+  requestedAt: any;
+  status: 'pending' | 'approved' | 'rejected';
+  teacherId: string;
+  teacherName: string;
+  leaseNumber?: string;
+  workLocation?: string;
+  phone?: string;
+  teachingCadre?: string;
+  rejectionReason?: string;
+  respondedAt?: any;
+}
+
 export interface User {
   id: string;
   fullName: string;
@@ -8,6 +46,9 @@ export interface User {
   role: Role;
   sportId?: string; // For SPORT_MANAGER e.g. 'basketball', 'football'
   assignedTournamentId?: string; // Specific assigned tournament
+  directorateId?: string; // المعرف الخاص بالمديرية الإقليمية
+  directorateName?: string;
+  isSuperAdmin?: boolean; // هل هو مسير مركزي فائق الصلاحيات (aminens21 / printomrdesigne)
   isActive: boolean;
   createdAt: any; // Firestore Timestamp
   updatedAt: any;
@@ -20,6 +61,8 @@ export interface User {
   isTechCommitteeMember?: boolean; // عضو لجنة تقنية
   techCommitteeSportsMemberOf?: string[]; // التخصصات الرياضية التي يشارك في لجنتها التقنية كعضو
   photoUrl?: string; // صورة الأستاذ الشخصية
+  teachingCadre?: 'PRIMARY' | 'MIDDLE' | 'HIGH' | string; // الإطار التعليمي: أستاذ الابتدائي / ثانوي إعدادي / ثانوي تأهيلي
+  pendingTransfer?: DirectorateTransferRequest | null; // طلب انتقال معلق إلى مديرية أخرى بانتظار موافقة مسيرها
 }
 
 export interface Sport {
@@ -36,6 +79,17 @@ export interface Sport {
   createdAt?: any;
 }
 
+export type RoleKey = 'TEACHER' | 'TECH_COMMITTEE_HEAD' | 'SPORT_MANAGER' | 'CENTRAL_ADMIN';
+
+export interface RoleSidebarPermissions {
+  TEACHER: string[];
+  TECH_COMMITTEE_HEAD: string[];
+  SPORT_MANAGER: string[];
+  CENTRAL_ADMIN: string[];
+}
+
+export type AffiliationType = 'non_club' | 'club_affiliated' | 'open';
+
 export interface Tournament {
   id: string;
   name: string;
@@ -44,15 +98,18 @@ export interface Tournament {
   ageCategory: string;
   gender: 'Male' | 'Female' | 'Mixed';
   level: 'Primary' | 'Middle' | 'High' | string;
-  scope: 'Provincial' | 'Regional';
+  scope: 'Provincial' | 'Regional' | 'National' | string;
+  affiliationType?: 'non_club' | 'club_affiliated' | 'open' | string; // فئة: غير منتمين للأندية (أبيض) أو منتمين للأندية (أصفر فاتح)
   startDate: any;
   endDate: any;
+  registrationDeadline?: any; // آخر أجل للتسجيل في البطولة
   status: 'Draft' | 'Scheduled' | 'Ongoing' | 'Completed' | 'Archived';
   description?: string;
   managerName?: string;
   managerPhone?: string;
   managerEmail?: string;
   accessCode?: string; // القن السري المخصص لمسؤول البطولة
+  directorateId?: string;
 }
 
 export interface School {
@@ -60,10 +117,12 @@ export interface School {
   name: string;
   type: string;
   commune: string;
-  teacherName: string;
-  phone?: string; // هاتف الأستاذ المؤطر
+  teacherName: string; // اسم المنسق (أو الأستاذ المنسق)
+  coordinatorName?: string; // اسم منسق مادة التربية البدنية بالمؤسسة
+  phone?: string; // هاتف المنسق
   principalName?: string; // اسم مدير المؤسسة
   principalPhone?: string; // هاتف مدير المؤسسة
+  directorateId?: string;
 }
 
 export interface Team {
@@ -73,6 +132,7 @@ export interface Team {
   sportId: string;
   gender: 'Male' | 'Female' | 'Mixed';
   category: string;
+  directorateId?: string;
 }
 
 export interface Referee {
@@ -83,6 +143,7 @@ export interface Referee {
   isActive: boolean;
   isTeacher?: boolean;
   photoUrl?: string;
+  directorateId?: string;
 }
 
 export interface Match {
@@ -111,6 +172,7 @@ export interface Match {
   scorers?: string;
   updatedBy?: string;
   updatedAt: any;
+  directorateId?: string;
 }
 
 export interface Venue {
@@ -120,6 +182,7 @@ export interface Venue {
   address: string;
   capacity?: number;
   notes?: string;
+  directorateId?: string;
 }
 
 export interface Announcement {
@@ -130,11 +193,13 @@ export interface Announcement {
   priority: 'Low' | 'Medium' | 'High';
   expiryDate: any;
   authorId: string;
+  directorateId?: string;
 }
 
 export interface Student {
   id: string;
   fullName: string;
+  massarNumber?: string; // رقم مسار للتلميذ (مثال: G134567890)
   gender: 'Male' | 'Female'; // ذكر ، أنثى
   birthDate: string; // YYYY-MM-DD
   category: string; // e.g. 'U12', 'U15', 'U18', 'U20', 'OPEN'
@@ -142,11 +207,16 @@ export interface Student {
   schoolName: string; // cache school name
   sportId: string; // chosen sport
   photoUrl?: string; // photo data url or URL
+  affiliationType?: 'non_club' | 'club_affiliated'; // غير منتمي لنادي / منتمي لنادي
   participationType?: 'individual' | 'school_team'; // نوع المشاركة في العدو الريفي: فردي أو فريق المؤسسة
   distance?: string; // المسافة للعدو الريفي (مثلا: 1000 م، 1500 م)
   athleticsSpecialty?: string; // تخصص ألعاب القوى المحدد (القفز الطولي، القفز العلوي، جري 80 متر...)
+  coachName?: string; // اسم الأستاذ المؤطر لهذه الفئة/الرياضة
+  coachLeaseNumber?: string; // رقم تأجير الأستاذ المؤطر
+  coachPhone?: string; // هاتف الأستاذ المؤطر
   createdAt: any;
   updatedAt: any;
+  directorateId?: string;
 }
 
 export interface AppNotification {
@@ -158,5 +228,31 @@ export interface AppNotification {
   userIds?: string[]; // مستخدمين محددين مستهدفين بالخصوص
   createdAt: any;
   readBy?: string[]; // قائمة معرفات المستخدمين الذين قرأوا الإشعار
+  directorateId?: string;
 }
+
+export interface PodiumWinner {
+  rank: number; // 1, 2, 3, 4, 5...
+  fullName: string;
+  schoolName: string;
+  studentId?: string;
+  time?: string;
+  bibNumber?: string;
+  notes?: string;
+}
+
+export interface CrossCountryCategoryResult {
+  categoryId: string; // e.g. 'u12_male', 'u15_female'
+  category: string; // 'U12' | 'U15' | 'U18' | 'U20'
+  gender: 'Male' | 'Female';
+  titleAr: string;
+  distance: string;
+  seasonId?: string;
+  directorateId?: string;
+  venueName?: string;
+  podium: PodiumWinner[];
+  updatedAt?: any;
+  updatedBy?: string;
+}
+
 

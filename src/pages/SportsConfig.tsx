@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { DataService, SPORTS_MAP, getAgeCategoriesForSeason } from '../lib/dataService';
-import { Sport, Tournament } from '../types';
+import { Sport, Tournament, RoleKey, RoleSidebarPermissions } from '../types';
 import { useAuth } from '../contexts/AuthContext';
 import {
   Settings,
@@ -24,7 +24,11 @@ import {
   Clock,
   SlidersHorizontal,
   Layers,
-  Users
+  Users,
+  Building2,
+  KeyRound,
+  Upload,
+  Image
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
@@ -101,9 +105,26 @@ export const SportsConfig: React.FC = () => {
   const [isAddingSeason, setIsAddingSeason] = useState(false);
   const [savingNewSeason, setSavingNewSeason] = useState(false);
 
-  // Search & Filter
-  const [searchQuery, setSearchQuery] = useState('');
+  // Active Tab
+  const [activeConfigTab, setActiveConfigTab] = useState<'sports' | 'permissions' | 'logos'>('sports');
+
+  // Official Logos State
+  const [ministryLogo, setMinistryLogo] = useState<string>('');
+  const [frmssLogo, setFrmssLogo] = useState<string>('');
+  const [ministryLogoHeight, setMinistryLogoHeight] = useState<number>(80);
+  const [frmssLogoHeight, setFrmssLogoHeight] = useState<number>(60);
+  const [savingLogos, setSavingLogos] = useState(false);
+
+  // Role Permissions State
+  const [rolePermissions, setRolePermissions] = useState<RoleSidebarPermissions>({
+    CENTRAL_ADMIN: ['/dashboard', '/schools', '/tournaments', '/teachers', '/tech-committee', '/referees', '/matches', '/statistics', '/sports-config'],
+    TECH_COMMITTEE_HEAD: ['/dashboard', '/schools', '/tournaments', '/teachers', '/tech-committee', '/referees', '/matches', '/statistics', '/sports-config'],
+    SPORT_MANAGER: ['/dashboard', '/schools', '/tournaments', '/teachers', '/referees', '/matches', '/statistics'],
+    TEACHER: ['/dashboard', '/schools', '/tournaments', '/matches', '/statistics']
+  });
+  const [savingPermissions, setSavingPermissions] = useState(false);
   const [statusFilter, setStatusFilter] = useState<'ALL' | 'PROGRAMMED' | 'UNPROGRAMMED'>('ALL');
+  const [searchQuery, setSearchQuery] = useState('');
 
   // New Sport Modal State (Exclusive to CENTRAL_ADMIN)
   const [isAddSportModalOpen, setIsAddSportModalOpen] = useState(false);
@@ -132,9 +153,8 @@ export const SportsConfig: React.FC = () => {
 
   // Helper function to resolve programmed status
   const isSportProgrammed = (s: Sport): boolean => {
-    if (s.isProgrammed !== undefined) return s.isProgrammed;
-    if (s.id === 'cross_country') return true;
     if (tournaments.some(t => t.sportId === s.id)) return true;
+    if (s.isProgrammed !== undefined) return s.isProgrammed;
     return (s.ageCategories && s.ageCategories.length > 0 && s.studentLimit !== undefined && s.studentLimit > 0) || false;
   };
 
@@ -166,6 +186,13 @@ export const SportsConfig: React.FC = () => {
 
   useEffect(() => {
     loadSportsAndSeason();
+    const handleDirChange = () => {
+      loadSportsAndSeason();
+    };
+    window.addEventListener('directorateChanged', handleDirChange);
+    return () => {
+      window.removeEventListener('directorateChanged', handleDirChange);
+    };
   }, []);
 
   // Initialize categories for new sport modal when season loads
@@ -179,22 +206,106 @@ export const SportsConfig: React.FC = () => {
   const loadSportsAndSeason = async () => {
     setLoading(true);
     try {
-      const [config, season, seasons, tourns] = await Promise.all([
+      const activeDirId = DataService.getActiveDirectorateId();
+      const [config, season, seasons, tourns, perms, logos] = await Promise.all([
         DataService.getSportsConfig(),
         DataService.getActiveSeason(),
         DataService.getSeasons(),
-        DataService.getTournaments()
+        DataService.getTournaments(),
+        DataService.getRoleSidebarPermissions(),
+        DataService.getOfficialLogos()
       ]);
       setSportsList(config);
       setCurrentSeason(season);
       setSeasonsList(seasons);
-      setTournaments(tourns);
+      
+      const dirTourns = tourns.filter(t => (t.directorateId || 'taourirt') === activeDirId);
+      setTournaments(dirTourns);
+      if (perms) setRolePermissions(perms);
+      if (logos) {
+        if (logos.ministryLogo) setMinistryLogo(logos.ministryLogo);
+        if (logos.frmssLogo) setFrmssLogo(logos.frmssLogo);
+        if (logos.ministryLogoHeight) setMinistryLogoHeight(logos.ministryLogoHeight);
+        if (logos.frmssLogoHeight) setFrmssLogoHeight(logos.frmssLogoHeight);
+      }
     } catch (error) {
       console.error('Error loading sports config and season:', error);
       toast.error('حدث خطأ أثناء تحميل إعدادات الفئات والموسم الرياضي');
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleLogoUpload = (e: React.ChangeEvent<HTMLInputElement>, setLogoState: (val: string) => void) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 2 * 1024 * 1024) {
+      toast.error('حجم الصورة كبير جداً، يرجى اختيار صورة أقل من 2 ميغابايت');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const result = event.target?.result as string;
+      if (result) {
+        setLogoState(result);
+        toast.success('تم تحميل الصورة بنجاح');
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleSaveOfficialLogos = async () => {
+    setSavingLogos(true);
+    try {
+      await DataService.saveOfficialLogos({
+        ministryLogo,
+        frmssLogo,
+        ministryLogoHeight,
+        frmssLogoHeight
+      });
+      toast.success('تم حفظ الشعارات الرسمية والمقاييس المحددة بنجاح! سيتم تطبيقها في ترويسة لائحة المشاركة');
+    } catch (err) {
+      toast.error('حدث خطأ أثناء حفظ الشعارات');
+    } finally {
+      setSavingLogos(false);
+    }
+  };
+
+  const handleTogglePermission = (roleKey: RoleKey, href: string) => {
+    setRolePermissions(prev => {
+      const currentList = prev[roleKey] || [];
+      const updated = currentList.includes(href)
+        ? currentList.filter(h => h !== href)
+        : [...currentList, href];
+      return {
+        ...prev,
+        [roleKey]: updated
+      };
+    });
+  };
+
+  const handleSaveRolePermissions = async () => {
+    setSavingPermissions(true);
+    try {
+      await DataService.saveRoleSidebarPermissions(rolePermissions);
+      toast.success('تم حفظ صلاحيات وأزرار القائمة الجانبية بنجاح لجميع الصفات!');
+    } catch (error) {
+      console.error('Error saving role permissions:', error);
+      toast.error('حدث خطأ أثناء حفظ الصلاحيات');
+    } finally {
+      setSavingPermissions(false);
+    }
+  };
+
+  const handleResetRolePermissions = () => {
+    const DEFAULT_PERMISSIONS: RoleSidebarPermissions = {
+      CENTRAL_ADMIN: ['/dashboard', '/tournaments', '/schools', '/teachers', '/tech-committee', '/referees', '/matches', '/statistics', '/sports-config'],
+      TECH_COMMITTEE_HEAD: ['/dashboard', '/tournaments', '/schools', '/teachers', '/tech-committee', '/referees', '/matches', '/statistics', '/sports-config'],
+      SPORT_MANAGER: ['/dashboard', '/tournaments', '/schools', '/teachers', '/referees', '/matches', '/statistics'],
+      TEACHER: ['/dashboard', '/tournaments', '/schools', '/matches', '/statistics']
+    };
+    setRolePermissions(DEFAULT_PERMISSIONS);
+    toast.success('تمت إعادة ضبط الصلاحيات إلى القيم الافتراضية. لا تنس الضغط على حفظ.');
   };
 
   const handleSeasonChange = async (newSeason: string) => {
@@ -472,7 +583,380 @@ export const SportsConfig: React.FC = () => {
         </div>
       </div>
 
-      {/* Overview Statistics Bar */}
+      {/* Settings Sub-Tabs */}
+      <div className="bg-white p-2 rounded-2xl border border-slate-200/80 shadow-xs flex flex-wrap items-center justify-between gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setActiveConfigTab('sports')}
+            className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+              activeConfigTab === 'sports'
+                ? 'bg-blue-600 text-white shadow-xs'
+                : 'text-slate-600 hover:bg-slate-100'
+            }`}
+          >
+            <SlidersHorizontal className="h-4 w-4" />
+            <span>ضوابط الرياضات والموسم الرياضي</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveConfigTab('permissions')}
+            className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+              activeConfigTab === 'permissions'
+                ? 'bg-purple-600 text-white shadow-xs'
+                : 'text-slate-600 hover:bg-slate-100'
+            }`}
+          >
+            <Users className="h-4 w-4" />
+            <span>تحديد الأزرار الجانبية المتاحة لكل صفة</span>
+            <span className="bg-white/20 text-current px-2 py-0.5 rounded-full text-[10px]">
+              4 صفات
+            </span>
+          </button>
+
+          {isCentralAdmin && (
+            <button
+              type="button"
+              onClick={() => setActiveConfigTab('logos')}
+              className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                activeConfigTab === 'logos'
+                  ? 'bg-emerald-600 text-white shadow-xs'
+                  : 'text-slate-600 hover:bg-slate-100'
+              }`}
+            >
+              <Upload className="h-4 w-4" />
+              <span>تحميل الشعارات الرسمية (الوزارة والجامعة) 🖼️</span>
+            </button>
+          )}
+        </div>
+
+        {isCentralAdmin && (
+          <button
+            type="button"
+            onClick={() => navigate('/directorates')}
+            className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-black transition-all cursor-pointer bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-700 hover:to-teal-800 text-white shadow-xs"
+          >
+            <Building2 className="h-4 w-4 text-emerald-200" />
+            <span>تدبير المديريات الإقليمية والأقنان السرية (PIN) 🏢</span>
+          </button>
+        )}
+      </div>
+
+      {/* Permissions View */}
+      {activeConfigTab === 'permissions' ? (
+        <div className="space-y-6 animate-in fade-in duration-150">
+          {/* Header Action Card */}
+          <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div>
+              <h3 className="text-sm font-bold text-slate-800 flex items-center gap-2">
+                <ShieldAlert className="h-4 w-4 text-purple-600" />
+                <span>ضبط وتحديد أزرار القائمة الجانبية حسب صفة المستخدم</span>
+              </h3>
+              <p className="text-xs text-slate-500 mt-1">
+                قم بالـتأشير على الأزرار التي ترغب في إظهارها في القائمة الجانبية لكل صفة من الصفات الأربع أدناه: أستاذ(ة)، أستاذ(ة) رئيس(ة) اللجنة التقنية، مسير، ومسير مركزي.
+              </p>
+            </div>
+
+            <div className="flex items-center gap-2 shrink-0 self-end sm:self-auto">
+              <button
+                type="button"
+                onClick={handleResetRolePermissions}
+                className="px-3.5 py-2 border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-bold rounded-xl transition-all shadow-3xs cursor-pointer"
+              >
+                إعادة الضبط
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveRolePermissions}
+                disabled={savingPermissions}
+                className="flex items-center gap-1.5 px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold rounded-xl transition-all shadow-xs cursor-pointer disabled:opacity-50"
+              >
+                <Save className="h-4 w-4" />
+                <span>{savingPermissions ? 'جاري الحفظ...' : 'حفظ الصلاحيات'}</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Grid of 4 Roles */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+            {[
+              {
+                key: 'TEACHER' as RoleKey,
+                title: 'أستاذ(ة) التربية البدنية',
+                subtitle: 'مؤطر الرياضة المدرسية بالمؤسسة التعليمية',
+                badgeBg: 'bg-emerald-50 border-emerald-200 text-emerald-800',
+                badgeText: 'أستاذ(ة)'
+              },
+              {
+                key: 'TECH_COMMITTEE_HEAD' as RoleKey,
+                title: 'أستاذ(ة) رئيس(ة) اللجنة التقنية',
+                subtitle: 'المشرف التقني الإقليمي على التخصص الرياضي',
+                badgeBg: 'bg-blue-50 border-blue-200 text-blue-800',
+                badgeText: 'أستاذ(ة) رئيس(ة) اللجنة التقنية'
+              },
+              {
+                key: 'SPORT_MANAGER' as RoleKey,
+                title: 'مسير رياضي',
+                subtitle: 'مسؤول تتبع وتنسيق المنافسات الرياضية',
+                badgeBg: 'bg-indigo-50 border-indigo-200 text-indigo-800',
+                badgeText: 'مسير'
+              },
+              {
+                key: 'CENTRAL_ADMIN' as RoleKey,
+                title: 'مسير مركزي',
+                subtitle: 'المسؤول الإقليمي والمشرف العام على المنظومة',
+                badgeBg: 'bg-amber-50 border-amber-200 text-amber-800',
+                badgeText: 'مسير مركزي'
+              }
+            ].map(role => {
+              const allowedHrefs = rolePermissions[role.key] || [];
+              const sidebarItemsList = [
+                { href: '/dashboard', label: 'الرئيسية والإشعارات', icon: '🏠', desc: 'لوحة التحكم الرئيسية والتنبيهات العامة' },
+                { href: '/schools', label: 'المؤسسات التعليمية', icon: '🏫', desc: 'دليل ورعاة وممثلي المؤسسات التعليمية بمديرية تاوريرت' },
+                { href: '/tournaments', label: 'البطولات الرياضية المدرسية', icon: '🏆', desc: 'استعراض وإدارة البطولات الإقليمية والجهوية والوطنية وتفرعاتها وتسجيل الفرق' },
+                { href: '/teachers', label: 'الأطر التربوية', icon: '👨‍🏫', desc: 'قائمة أساتذة التربية البدنية ومؤطري الرياضة المدرسية' },
+                { href: '/tech-committee', label: 'رؤساء اللجن التقنية', icon: '🛡️', desc: 'إدارة وتعيين مسؤولي اللجان التقنية حسب الرياضات' },
+                { href: '/referees', label: 'الحكام', icon: '🏁', desc: 'سجل وتنظيم الحكام المعتمدين وتعيينات المباريات' },
+                { href: '/matches', label: 'المباريات والنتائج', icon: '⚽', desc: 'برمجة وتدقيق وتسجيل نتائج المباريات المدرسية' },
+                { href: '/statistics', label: 'إحصائيات عامة', icon: '📊', desc: 'مؤشرات الأداء، ونسب المشاركة، والتحليلات البيانية' },
+                { href: '/sports-config', label: 'الإعدادات والضوابط', icon: '⚙️', desc: 'ضوابط الرياضات والمواسم وصلاحيات الوصول والقائمة الجانبية' },
+              ];
+
+              return (
+                <div key={role.key} className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden flex flex-col">
+                  <div className="p-4 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded border ${role.badgeBg}`}>
+                          {role.badgeText}
+                        </span>
+                        <h4 className="text-xs font-bold text-slate-800">{role.title}</h4>
+                      </div>
+                      <p className="text-[11px] text-slate-500 mt-0.5">{role.subtitle}</p>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const allHrefs = sidebarItemsList.map(i => i.href);
+                          setRolePermissions(prev => ({ ...prev, [role.key]: allHrefs }));
+                        }}
+                        className="text-[10px] font-bold text-blue-600 hover:underline cursor-pointer"
+                      >
+                        تحديد الكل
+                      </button>
+                      <span className="text-slate-300 text-xs">|</span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setRolePermissions(prev => ({ ...prev, [role.key]: [] }));
+                        }}
+                        className="text-[10px] font-bold text-slate-500 hover:underline cursor-pointer"
+                      >
+                        إلغاء الكل
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="p-3 divide-y divide-slate-100 flex-1 space-y-1">
+                    {sidebarItemsList.map(item => {
+                      const isChecked = allowedHrefs.includes(item.href);
+                      return (
+                        <label
+                          key={item.href}
+                          className={`flex items-start gap-3 p-2.5 rounded-xl transition-all cursor-pointer select-none ${
+                            isChecked ? 'bg-purple-50/50 hover:bg-purple-50' : 'hover:bg-slate-50'
+                          }`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={isChecked}
+                            onChange={() => handleTogglePermission(role.key, item.href)}
+                            className="mt-1 h-4 w-4 rounded border-slate-300 text-purple-600 focus:ring-purple-500 cursor-pointer"
+                          />
+                          <div className="flex-1">
+                            <div className="flex items-center gap-2">
+                              <span className="text-sm">{item.icon}</span>
+                              <span className={`text-xs font-bold ${isChecked ? 'text-slate-900' : 'text-slate-400'}`}>
+                                {item.label}
+                              </span>
+                            </div>
+                            <p className="text-[10px] text-slate-400 mt-0.5">{item.desc}</p>
+                          </div>
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      ) : activeConfigTab === 'logos' ? (
+        <div className="space-y-6 animate-in fade-in duration-150">
+          {/* Header Action Card */}
+          <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div>
+              <h3 className="text-sm font-bold text-slate-800 flex items-center gap-2">
+                <span>🖼️ تحميل الشعارات الرسمية لتزيين لوائح المشاركة</span>
+              </h3>
+              <p className="text-xs text-slate-500 mt-1">
+                قم بتحميل شعار وزارة التربية الوطنية وشعار الجامعة الملكية المغربية للرياضة المدرسية لاستخدامهما تلقائياً في ترويسة جميع لوائح المشاركة والمستندات الرسمية (PDF).
+              </p>
+            </div>
+
+            <button
+              type="button"
+              onClick={handleSaveOfficialLogos}
+              disabled={savingLogos}
+              className="flex items-center gap-1.5 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl transition-all shadow-xs cursor-pointer disabled:opacity-50 shrink-0"
+            >
+              <Save className="h-4 w-4" />
+              <span>{savingLogos ? 'جاري الحفظ...' : 'حفظ الشعارات الرسمية'}</span>
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {/* Ministry Logo Card */}
+            <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-xs flex flex-col items-center text-center space-y-4">
+              <div className="w-full flex items-center justify-between pb-3 border-b border-slate-100">
+                <span className="text-xs font-bold text-slate-800">1. شعار وزارة التربية الوطنية والتعليم الأولي والرياضة</span>
+                <span className="text-[10px] bg-sky-50 text-sky-700 px-2 py-0.5 rounded-full font-bold border border-sky-200">يمين الترويسة</span>
+              </div>
+
+              <div className="w-48 h-48 bg-slate-50 border-2 border-dashed border-slate-200 rounded-2xl flex items-center justify-center relative overflow-hidden">
+                {ministryLogo ? (
+                  <img 
+                    src={ministryLogo} 
+                    alt="شعار الوزارة" 
+                    className="object-contain p-3 transition-all" 
+                    style={{ height: `${ministryLogoHeight}px` }} 
+                  />
+                ) : (
+                  <div className="text-slate-400 text-xs font-bold flex flex-col items-center gap-2">
+                    <span className="text-4xl">🏛️</span>
+                    <span>لم يتم رفع الشعار بعد</span>
+                  </div>
+                )}
+              </div>
+
+              {ministryLogo && (
+                <div className="w-full space-y-2 px-4 pt-2 border-t border-slate-100">
+                  <div className="flex items-center justify-between text-[11px] font-bold text-slate-600">
+                    <span>مقياس الارتفاع (بالبكسل):</span>
+                    <span className="text-sky-700 font-mono">{ministryLogoHeight}px</span>
+                  </div>
+                  <input
+                    type="range"
+                    min="30"
+                    max="180"
+                    value={ministryLogoHeight}
+                    onChange={(e) => setMinistryLogoHeight(Number(e.target.value))}
+                    className="w-full h-1 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-sky-600"
+                  />
+                  <div className="flex justify-between text-[9px] text-slate-400">
+                    <span>تصغير (30px)</span>
+                    <span>تكبير (180px)</span>
+                  </div>
+                </div>
+              )}
+
+              <div className="flex items-center gap-2 pt-2">
+                <label className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold cursor-pointer transition-all shadow-3xs flex items-center gap-1.5">
+                  <Upload className="h-4 w-4" />
+                  <span>{ministryLogo ? 'تغيير شعار الوزارة' : 'رفع شعار الوزارة'}</span>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={(e) => handleLogoUpload(e, setMinistryLogo)}
+                  />
+                </label>
+                {ministryLogo && (
+                  <button
+                    type="button"
+                    onClick={() => setMinistryLogo('')}
+                    className="px-3.5 py-2 bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 rounded-xl text-xs font-bold transition-all cursor-pointer"
+                  >
+                    حذف
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* FRMSS Logo Card */}
+            <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-xs flex flex-col items-center text-center space-y-4">
+              <div className="w-full flex items-center justify-between pb-3 border-b border-slate-100">
+                <span className="text-xs font-bold text-slate-800">2. شعار الجامعة الملكية المغربية للرياضة المدرسية</span>
+                <span className="text-[10px] bg-purple-50 text-purple-700 px-2 py-0.5 rounded-full font-bold border border-purple-200">يسار/وسط الترويسة</span>
+              </div>
+
+              <div className="w-48 h-48 bg-slate-50 border-2 border-dashed border-slate-200 rounded-2xl flex items-center justify-center relative overflow-hidden">
+                {frmssLogo ? (
+                  <img 
+                    src={frmssLogo} 
+                    alt="شعار الجامعة الملكية" 
+                    className="object-contain p-3 transition-all" 
+                    style={{ height: `${frmssLogoHeight}px` }} 
+                  />
+                ) : (
+                  <div className="text-slate-400 text-xs font-bold flex flex-col items-center gap-2">
+                    <span className="text-4xl">🏆</span>
+                    <span>لم يتم رفع الشعار بعد</span>
+                  </div>
+                )}
+              </div>
+
+              {frmssLogo && (
+                <div className="w-full space-y-2 px-4 pt-2 border-t border-slate-100">
+                  <div className="flex items-center justify-between text-[11px] font-bold text-slate-600">
+                    <span>مقياس الارتفاع (بالبكسل):</span>
+                    <span className="text-purple-700 font-mono">{frmssLogoHeight}px</span>
+                  </div>
+                  <input
+                    type="range"
+                    min="30"
+                    max="180"
+                    value={frmssLogoHeight}
+                    onChange={(e) => setFrmssLogoHeight(Number(e.target.value))}
+                    className="w-full h-1 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-purple-600"
+                  />
+                  <div className="flex justify-between text-[9px] text-slate-400">
+                    <span>تصغير (30px)</span>
+                    <span>تكبير (180px)</span>
+                  </div>
+                </div>
+              )}
+
+              <div className="flex items-center gap-2 pt-2">
+                <label className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold cursor-pointer transition-all shadow-3xs flex items-center gap-1.5">
+                  <Upload className="h-4 w-4" />
+                  <span>{frmssLogo ? 'تغيير شعار الجامعة' : 'رفع شعار الجامعة'}</span>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={(e) => handleLogoUpload(e, setFrmssLogo)}
+                  />
+                </label>
+                {frmssLogo && (
+                  <button
+                    type="button"
+                    onClick={() => setFrmssLogo('')}
+                    className="px-3.5 py-2 bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 rounded-xl text-xs font-bold transition-all cursor-pointer"
+                  >
+                    حذف
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : (
+        <div className="space-y-6">
+          {/* Overview Statistics Bar */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <div className="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-xs flex items-center gap-3">
           <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center shrink-0">
@@ -786,22 +1270,22 @@ export const SportsConfig: React.FC = () => {
                         <Layers className="h-4 w-4 text-blue-600" />
                         <span>الفئات العمرية المعنية بالتخصص:</span>
                       </span>
-                      <div className="flex items-center gap-2">
-                        <button
-                          type="button"
-                          onClick={() => handleSelectAllCategories(sport.id)}
-                          className="text-[10px] font-bold text-blue-600 hover:underline cursor-pointer"
-                        >
-                          تحديد الكل
-                        </button>
-                        <span className="text-slate-300 text-xs">|</span>
-                        <button
-                          type="button"
-                          onClick={() => handleClearAllCategories(sport.id)}
-                          className="text-[10px] font-bold text-slate-500 hover:underline cursor-pointer"
-                        >
-                          إلغاء الكل
-                        </button>
+                      <div className="flex items-center gap-3">
+                        <label className="flex items-center gap-1.5 px-2.5 py-1 bg-emerald-50 border border-emerald-300 rounded-lg text-xs font-black text-emerald-900 cursor-pointer hover:bg-emerald-100 transition-colors shadow-2xs">
+                          <input
+                            type="checkbox"
+                            checked={seasonalCategories.length > 0 && seasonalCategories.every(c => activeCategories.includes(c.id))}
+                            onChange={(e) => {
+                              if (e.target.checked) {
+                                handleSelectAllCategories(sport.id);
+                              } else {
+                                handleClearAllCategories(sport.id);
+                              }
+                            }}
+                            className="rounded border-emerald-400 text-emerald-600 focus:ring-emerald-500 w-4 h-4 cursor-pointer accent-emerald-600"
+                          />
+                          <span>المشاركة في جميع الفئات (تحديد الكل) 🏆</span>
+                        </label>
                       </div>
                     </div>
 
@@ -1000,6 +1484,8 @@ export const SportsConfig: React.FC = () => {
             })
           )}
         </div>
+      )}
+      </div>
       )}
 
       {/* ADD NEW SPORT MODAL (CENTRAL ADMIN ONLY) */}

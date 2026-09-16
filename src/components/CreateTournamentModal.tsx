@@ -1,7 +1,7 @@
-import React, { useState, useEffect } from 'react';
-import { Tournament, Sport } from '../types';
-import { AGE_CATEGORIES, DataService, getAgeCategoriesForSeason, SPORTS_MAP } from '../lib/dataService';
-import { X, Trophy, Calendar, Users, Target, Award, Sparkles, ShieldCheck, RefreshCw, Check } from 'lucide-react';
+import React, { useState, useEffect, useMemo } from 'react';
+import { Tournament, Sport, Directorate } from '../types';
+import { AGE_CATEGORIES, DataService, getAgeCategoriesForSeason, SPORTS_MAP, getCategoryGenderLabel, normalizeCategoryKey } from '../lib/dataService';
+import { X, Trophy, Calendar, Users, Target, Award, Sparkles, ShieldCheck, RefreshCw, Check, Clock } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 interface CreateTournamentModalProps {
@@ -26,22 +26,26 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
   // Custom states for multi-select categories and gender combinations
   const [selectedCategories, setSelectedCategories] = useState<string[]>(['U15']);
   const [genderSelection, setGenderSelection] = useState<'Male' | 'Female' | 'Both' | 'Mixed'>('Both');
+  const [affiliationSelection, setAffiliationSelection] = useState<'both' | 'non_club' | 'club_affiliated'>('both');
 
   // Sports Configuration for custom/dynamic categories
   const [sportsConfig, setSportsConfig] = useState<Sport[]>([]);
   const [loadingConfig, setLoadingConfig] = useState(false);
   const [currentSeason, setCurrentSeason] = useState('2026/2027');
+  const [activeDirObj, setActiveDirObj] = useState<Directorate | null>(null);
 
   useEffect(() => {
     if (isOpen) {
       setLoadingConfig(true);
       Promise.all([
         DataService.getSportsConfig(),
-        DataService.getActiveSeason()
+        DataService.getActiveSeason(),
+        DataService.getActiveDirectorate()
       ])
-        .then(([config, season]) => {
+        .then(([config, season, activeDir]) => {
           setSportsConfig(config);
           setCurrentSeason(season);
+          setActiveDirObj(activeDir);
           setLoadingConfig(false);
         })
         .catch(err => {
@@ -53,8 +57,11 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
 
   // Filter sports based on allowedSportIds for Tech Committee Head
   const availableSports = React.useMemo(() => {
-    if (!allowedSportIds || allowedSportIds.length === 0) return sportsConfig;
-    return sportsConfig.filter(s => allowedSportIds.includes(s.id));
+    if (allowedSportIds === null) return sportsConfig; // null means unrestricted (CENTRAL_ADMIN)
+    if (Array.isArray(allowedSportIds)) {
+      return sportsConfig.filter(s => allowedSportIds.includes(s.id));
+    }
+    return sportsConfig;
   }, [sportsConfig, allowedSportIds]);
 
   // Auto-set sportId to preselectedSportId or first allowed sport
@@ -71,7 +78,14 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
 
   const seasonalCategories = getAgeCategoriesForSeason(currentSeason);
   const activeSportConfig = sportsConfig.find(s => s.id === sportId);
-  const activeCategoriesForSport = activeSportConfig?.ageCategories || seasonalCategories.map(c => c.id);
+  const activeCategoriesForSport = useMemo(() => {
+    const rawCats: string[] = (activeSportConfig?.ageCategories && activeSportConfig.ageCategories.length > 0)
+      ? activeSportConfig.ageCategories
+      : seasonalCategories.map(c => c.id);
+    const normalized: string[] = rawCats.map(c => normalizeCategoryKey(c)).filter((catId: string) => catId !== 'OPEN');
+    const validSet: string[] = Array.from(new Set(normalized)).filter((catId: string) => ['U12', 'U15', 'U18', 'U20'].includes(catId));
+    return validSet.length > 0 ? validSet : ['U12', 'U15', 'U18', 'U20'];
+  }, [activeSportConfig, seasonalCategories]);
 
   // Fallback default selection when sportId changes and selected categories are not in the active list
   useEffect(() => {
@@ -83,21 +97,83 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
     }
   }, [sportId, sportsConfig, activeCategoriesForSport]);
 
-  // Transform IDs list to render items
-  const categoriesToRender = activeCategoriesForSport.map(catId => {
-    const predefined = seasonalCategories.find(c => c.id === catId);
-    return {
-      id: catId,
-      name: predefined ? predefined.name : catId,
-      shortName: predefined ? predefined.shortName : catId
-    };
-  });
+  // Transform IDs list to render items (excluding pseudo OPEN category)
+  const categoriesToRender = activeCategoriesForSport
+    .map(catId => {
+      const predefined = seasonalCategories.find(c => c.id === catId);
+      return {
+        id: catId,
+        name: predefined ? predefined.name : catId,
+        shortName: predefined ? predefined.shortName : catId
+      };
+    });
   
-  const [scope, setScope] = useState<'Provincial' | 'Regional'>('Provincial');
+  const [scope, setScope] = useState<'Provincial' | 'Regional' | 'National'>('Provincial');
   const [status, setStatus] = useState<Tournament['status']>('Scheduled');
   const [startDate, setStartDate] = useState('2026-03-01');
   const [endDate, setEndDate] = useState('2026-03-30');
+  const [registrationDeadline, setRegistrationDeadline] = useState('2026-02-28T23:59');
   const [description, setDescription] = useState('');
+
+  // Auto-prefill existing tournament data for sport if present
+  useEffect(() => {
+    if (isOpen && sportId) {
+      DataService.getTournaments().then(allTourns => {
+        const sportTourns = allTourns.filter(t => t.sportId === sportId);
+        if (sportTourns.length > 0) {
+          const sample = sportTourns[0];
+          if (sample.name) {
+            const cleanName = sample.name.replace(/\s*-\s*(ذكور|إناث|مختلط).*/, '').trim();
+            setName(cleanName);
+          }
+          if (sample.startDate) {
+            let d: Date | null = null;
+            if (typeof sample.startDate === 'object' && 'toDate' in sample.startDate && typeof (sample.startDate as any).toDate === 'function') d = (sample.startDate as any).toDate();
+            else if (sample.startDate instanceof Date) d = sample.startDate;
+            else d = new Date(sample.startDate);
+            if (d && !isNaN(d.getTime())) setStartDate(d.toISOString().split('T')[0]);
+          }
+          if (sample.endDate) {
+            let d: Date | null = null;
+            if (typeof sample.endDate === 'object' && 'toDate' in sample.endDate && typeof (sample.endDate as any).toDate === 'function') d = (sample.endDate as any).toDate();
+            else if (sample.endDate instanceof Date) d = sample.endDate;
+            else d = new Date(sample.endDate);
+            if (d && !isNaN(d.getTime())) setEndDate(d.toISOString().split('T')[0]);
+          }
+          if (sample.registrationDeadline) {
+            let d: Date | null = null;
+            if (typeof sample.registrationDeadline === 'object' && 'toDate' in sample.registrationDeadline && typeof (sample.registrationDeadline as any).toDate === 'function') d = (sample.registrationDeadline as any).toDate();
+            else if (sample.registrationDeadline instanceof Date) d = sample.registrationDeadline;
+            else d = new Date(sample.registrationDeadline);
+            if (d && !isNaN(d.getTime())) {
+              const year = d.getFullYear();
+              const month = String(d.getMonth() + 1).padStart(2, '0');
+              const day = String(d.getDate()).padStart(2, '0');
+              const hours = String(d.getHours()).padStart(2, '0');
+              const mins = String(d.getMinutes()).padStart(2, '0');
+              setRegistrationDeadline(`${year}-${month}-${day}T${hours}:${mins}`);
+            }
+          }
+          if (sample.description) setDescription(sample.description);
+          if (sample.scope) setScope(sample.scope as any);
+
+          const existingCats = Array.from(new Set(sportTourns.map(t => t.ageCategory).filter(Boolean)));
+          if (existingCats.length > 0) {
+            setSelectedCategories(existingCats);
+          }
+
+          const genders = new Set(sportTourns.map(t => t.gender));
+          if (genders.has('Male') && genders.has('Female')) setGenderSelection('Both');
+          else if (genders.has('Male')) setGenderSelection('Male');
+          else if (genders.has('Female')) setGenderSelection('Female');
+          else if (genders.has('Mixed')) setGenderSelection('Mixed');
+        } else {
+          const sportName = SPORTS_MAP[sportId]?.name || sportId;
+          setName(`البطولة الإقليمية لـ ${sportName}`);
+        }
+      });
+    }
+  }, [isOpen, sportId]);
 
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -142,48 +218,71 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
         gendersToGenerate.push('Mixed');
       }
 
-      // Generate combinations: categories x genders
+      // Determine affiliation types to generate: non_club, club_affiliated, or both (splits into 2 separate tournaments)
+      const affiliationsToGenerate: ('non_club' | 'club_affiliated')[] = [];
+      if (affiliationSelection === 'both') {
+        affiliationsToGenerate.push('non_club', 'club_affiliated');
+      } else if (affiliationSelection === 'non_club') {
+        affiliationsToGenerate.push('non_club');
+      } else {
+        affiliationsToGenerate.push('club_affiliated');
+      }
+
+      // Generate combinations: categories x genders x affiliations
       const tournamentsBatch: Omit<Tournament, 'id'>[] = [];
+      const activeDirId = activeDirObj?.id || DataService.getActiveDirectorateId();
 
       if (sportId === 'cross_country') {
-        tournamentsBatch.push({
-          name: name.trim() || 'البطولة الإقليمية المدرسية للعدو الريفي',
-          seasonId: currentSeason,
-          sportId: 'cross_country',
-          ageCategory: 'جميع الفئات العمرية (8 فئات مدمجة)',
-          gender: 'Mixed',
-          level: selectedLevels.join(','),
-          scope,
-          startDate: new Date(startDate),
-          endDate: new Date(endDate),
-          status,
-          description: description.trim() || 'البطولة الإقليمية المدرسية للعدو الريفي بمشاركة جميع الفئات والأجناس الثمانية المعتمدة (U12, U15, U18, U20 ذكور وإناث).'
-        });
+        for (const aff of affiliationsToGenerate) {
+          const affSuffix = aff === 'non_club' ? ' - لغير المنتمين للأندية' : ' - للمنتمين للأندية';
+          const affLabel = aff === 'non_club' ? 'لغير المنتمين للأندية' : 'للمنتمين للأندية';
+
+          tournamentsBatch.push({
+            name: `${name.trim() || `البطولة الإقليمية المدرسية للعدو الريفي - ${activeDirObj?.name || ''}`}${affSuffix}`,
+            seasonId: currentSeason,
+            sportId: 'cross_country',
+            ageCategory: 'جميع الفئات العمرية (8 فئات مدمجة)',
+            gender: 'Mixed',
+            level: selectedLevels.join(','),
+            scope,
+            affiliationType: aff,
+            startDate: new Date(startDate),
+            endDate: new Date(endDate),
+            registrationDeadline: registrationDeadline ? new Date(registrationDeadline) : new Date(endDate),
+            status,
+            description: description.trim() || `البطولة الإقليمية المدرسية للعدو الريفي (${affLabel}) بـ ${activeDirObj?.name || 'المديرية الإقليمية'} بمشاركة جميع الفئات والأجناس الثمانية المعتمدة (U12, U15, U18, U20 ذكور وإناث).`,
+            directorateId: activeDirId
+          });
+        }
       } else {
         for (const catId of selectedCategories) {
-          const catObj = seasonalCategories.find(c => c.id === catId);
-          const catShortName = catObj ? catObj.shortName : catId;
-          const catFullName = catObj ? catObj.name : catId;
-
           for (const gen of gendersToGenerate) {
-            const genderLabel = gen === 'Male' ? 'ذكور' : gen === 'Female' ? 'إناث' : 'مختلط';
-            
-            // Formulate distinct tournament name
-            const finalTournamentName = `${name.trim()} - ${genderLabel} (${catShortName})`;
+            const genderCatName = getCategoryGenderLabel(catId, gen);
 
-            tournamentsBatch.push({
-              name: finalTournamentName,
-              seasonId: currentSeason,
-              sportId,
-              ageCategory: catFullName,
-              gender: gen,
-              level: selectedLevels.join(','),
-              scope,
-              startDate: new Date(startDate),
-              endDate: new Date(endDate),
-              status,
-              description: description.trim() || 'بطولة مدرسية رسمية بمديرية تاوريرت'
-            });
+            for (const aff of affiliationsToGenerate) {
+              const affSuffix = aff === 'non_club' ? ' - لغير المنتمين للأندية' : ' - للمنتمين للأندية';
+              const affLabel = aff === 'non_club' ? 'لغير المنتمين للأندية' : 'للمنتمين للأندية';
+              
+              // Formulate distinct tournament name with affiliation
+              const finalTournamentName = `${name.trim()} - ${genderCatName}${affSuffix}`;
+
+              tournamentsBatch.push({
+                name: finalTournamentName,
+                seasonId: currentSeason,
+                sportId,
+                ageCategory: catId,
+                gender: gen,
+                level: selectedLevels.join(','),
+                scope,
+                affiliationType: aff,
+                startDate: new Date(startDate),
+                endDate: new Date(endDate),
+                registrationDeadline: registrationDeadline ? new Date(registrationDeadline) : new Date(endDate),
+                status,
+                description: description.trim() || `بطولة مدرسية رسمية (${affLabel}) بـ ${activeDirObj?.name || 'المديرية الإقليمية'}`,
+                directorateId: activeDirId
+              });
+            }
           }
         }
       }
@@ -197,6 +296,7 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
       setSelectedCategories(['U15']);
       setSelectedLevels(['High']);
       setGenderSelection('Both');
+      setAffiliationSelection('both');
       onClose();
     } catch (err) {
       console.error(err);
@@ -371,9 +471,15 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
             </div>
 
             <div>
-              <label className="block text-xs font-bold text-slate-800 mb-1.5">
-                تحديد الفئات العمرية المستهدفة (اختر فئة أو أكثر لتوليد فروع الفئات) <span className="text-red-500">*</span>
-              </label>
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="block text-xs font-bold text-slate-800">
+                  تحديد الفئات العمرية المستهدفة (اختر فئة أو أكثر) <span className="text-red-500">*</span>
+                </label>
+                <span className="text-[10px] text-slate-500 font-medium">
+                  (جميع الفئات ليست فئة - يمكن تحديد فئة أو المشاركة في جميع الفئات)
+                </span>
+              </div>
+
               {loadingConfig ? (
                 <div className="flex items-center gap-2 text-slate-400 text-xs py-2">
                   <RefreshCw className="h-3 w-3 animate-spin" />
@@ -384,26 +490,159 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
                   ⚠️ لم يتم تفعيل أو إضافة أي فئة لهذا التخصص بعد في لوحة التحكم.
                 </p>
               ) : (
-                <div className="flex flex-col gap-1.5 bg-white p-2.5 rounded-lg border border-slate-200">
-                  {categoriesToRender.map((cat) => {
-                    const isChecked = selectedCategories.includes(cat.id);
-                    return (
-                      <label
-                        key={cat.id}
-                        className="flex items-center gap-2.5 px-2.5 py-1.5 rounded-md hover:bg-slate-50 cursor-pointer text-xs font-bold text-slate-700 transition-colors"
-                      >
-                        <input
-                          type="checkbox"
-                          checked={isChecked}
-                          onChange={() => handleToggleCategory(cat.id)}
-                          className="rounded border-slate-300 text-blue-600 focus:ring-blue-500 w-4 h-4 cursor-pointer"
-                        />
-                        <span>{cat.name}</span>
-                      </label>
-                    );
-                  })}
+                <div className="flex flex-col gap-2 bg-white p-3 rounded-xl border border-slate-200 shadow-2xs">
+                  {/* Dedicated Checkbox for "المشاركة في جميع الفئات" */}
+                  <label className="flex items-center justify-between gap-2.5 px-3 py-2.5 rounded-xl bg-emerald-50 border border-emerald-300 hover:bg-emerald-100/90 cursor-pointer text-xs font-black text-emerald-950 transition-all shadow-2xs">
+                    <div className="flex items-center gap-2.5">
+                      <input
+                        type="checkbox"
+                        checked={categoriesToRender.length > 0 && categoriesToRender.every(cat => selectedCategories.includes(cat.id))}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            setSelectedCategories(categoriesToRender.map(cat => cat.id));
+                          } else {
+                            setSelectedCategories([]);
+                          }
+                        }}
+                        className="rounded border-emerald-400 text-emerald-600 focus:ring-emerald-500 w-4.5 h-4.5 cursor-pointer accent-emerald-600"
+                      />
+                      <span className="flex items-center gap-1.5">
+                        <span className="text-sm">🏆</span>
+                        <span className="font-black text-emerald-950 text-xs">المشاركة في جميع الفئات</span>
+                      </span>
+                    </div>
+                    <span className="text-[10px] font-bold text-emerald-700 bg-white px-2 py-0.5 rounded-md border border-emerald-200 shrink-0">
+                      Check box الكل
+                    </span>
+                  </label>
+
+                  <div className="pt-1 text-[11px] font-bold text-slate-500 pr-1">
+                    أو حدد الفئات العمرية المطلوبة:
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                    {categoriesToRender.map((cat) => {
+                      const isChecked = selectedCategories.includes(cat.id);
+                      return (
+                        <label
+                          key={cat.id}
+                          className={`flex items-center gap-2.5 px-2.5 py-2 rounded-lg border cursor-pointer text-xs font-bold transition-all ${
+                            isChecked
+                              ? 'bg-blue-50/90 border-blue-300 text-blue-900 shadow-2xs'
+                              : 'bg-slate-50/70 border-slate-200/80 text-slate-700 hover:bg-slate-100/80'
+                          }`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={isChecked}
+                            onChange={() => handleToggleCategory(cat.id)}
+                            className="rounded border-slate-300 text-blue-600 focus:ring-blue-500 w-4 h-4 cursor-pointer"
+                          />
+                          <span>{cat.name}</span>
+                        </label>
+                      );
+                    })}
+                  </div>
                 </div>
               )}
+            </div>
+          </div>
+
+          {/* Affiliation / Participation Category (Non-Club vs Club Affiliated) */}
+          <div className="space-y-2 p-3.5 bg-amber-50/50 border border-amber-200/80 rounded-xl">
+            <div className="flex items-center justify-between">
+              <label className="block text-xs font-bold text-amber-950">
+                نوع المشاركة والانتماء الرياضي (Club vs Non-Club) <span className="text-red-500">*</span>
+              </label>
+              <span className="text-[10px] bg-amber-100 text-amber-900 font-bold px-2 py-0.5 rounded border border-amber-300">
+                تصنيف رسمي
+              </span>
+            </div>
+            <p className="text-[11px] text-amber-800 leading-relaxed">
+              يمكنك برمجة بطولة مخصصة للمدرسيين غير المنتمين للأندية (بطاقة بيضاء)، أو للمنتمين للأندية (بطاقة صفراء فاتحة)، أو كلاهما معاً ليقوم النظام بإنشاء بطولتين مستقلتين.
+            </p>
+            
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-1">
+              {/* Option 1: Both */}
+              <button
+                type="button"
+                onClick={() => setAffiliationSelection('both')}
+                className={`p-2.5 rounded-xl text-right border transition-all cursor-pointer flex flex-col justify-between ${
+                  affiliationSelection === 'both'
+                    ? 'bg-blue-600 text-white border-blue-600 shadow-xs ring-2 ring-blue-400/40'
+                    : 'bg-white border-slate-200 hover:border-slate-300 text-slate-800'
+                }`}
+              >
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="font-extrabold text-xs">⚡ كلاهما معاً</span>
+                    <span className={`text-[9px] px-1.5 py-0.5 rounded font-bold ${
+                      affiliationSelection === 'both' ? 'bg-white/20 text-white' : 'bg-blue-50 text-blue-700'
+                    }`}>
+                      2 بطولتين
+                    </span>
+                  </div>
+                  <p className={`text-[10px] leading-tight ${
+                    affiliationSelection === 'both' ? 'text-blue-100' : 'text-slate-500'
+                  }`}>
+                    توليد بطولتين منفصلتين (لغير المنتمين + للمنتمين للأندية)
+                  </p>
+                </div>
+              </button>
+
+              {/* Option 2: Non-Club Only (White Card) */}
+              <button
+                type="button"
+                onClick={() => setAffiliationSelection('non_club')}
+                className={`p-2.5 rounded-xl text-right border transition-all cursor-pointer flex flex-col justify-between ${
+                  affiliationSelection === 'non_club'
+                    ? 'bg-slate-900 text-white border-slate-900 shadow-xs ring-2 ring-slate-400/40'
+                    : 'bg-white border-slate-200 hover:border-slate-300 text-slate-800'
+                }`}
+              >
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="font-extrabold text-xs">🏫 غير المنتمين للأندية</span>
+                    <span className={`text-[9px] px-1.5 py-0.5 rounded font-bold ${
+                      affiliationSelection === 'non_club' ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-700 border border-slate-200'
+                    }`}>
+                      بطاقة بيضاء
+                    </span>
+                  </div>
+                  <p className={`text-[10px] leading-tight ${
+                    affiliationSelection === 'non_club' ? 'text-slate-200' : 'text-slate-500'
+                  }`}>
+                    مقتصرة على التلاميذ غير الممارسين بالأندية الرياضية
+                  </p>
+                </div>
+              </button>
+
+              {/* Option 3: Club Affiliated Only (Light Yellow Card) */}
+              <button
+                type="button"
+                onClick={() => setAffiliationSelection('club_affiliated')}
+                className={`p-2.5 rounded-xl text-right border transition-all cursor-pointer flex flex-col justify-between ${
+                  affiliationSelection === 'club_affiliated'
+                    ? 'bg-amber-400 text-amber-950 border-amber-500 shadow-xs ring-2 ring-amber-400/60 font-bold'
+                    : 'bg-amber-50/80 border-amber-200 hover:border-amber-300 text-amber-900'
+                }`}
+              >
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="font-extrabold text-xs">⚽ المنتمين للأندية</span>
+                    <span className={`text-[9px] px-1.5 py-0.5 rounded font-bold ${
+                      affiliationSelection === 'club_affiliated' ? 'bg-amber-950/20 text-amber-950' : 'bg-amber-200/80 text-amber-900 border border-amber-300'
+                    }`}>
+                      بطاقة صفراء فاتحة
+                    </span>
+                  </div>
+                  <p className={`text-[10px] leading-tight ${
+                    affiliationSelection === 'club_affiliated' ? 'text-amber-950' : 'text-amber-700'
+                  }`}>
+                    مخصصة للتلاميذ الممارسين بالعصب والأندية
+                  </p>
+                </div>
+              </button>
             </div>
           </div>
 
@@ -434,6 +673,23 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
             </div>
           </div>
 
+          {/* Registration Deadline */}
+          <div className="bg-amber-50/60 border border-amber-200 rounded-xl p-3">
+            <label className="block text-xs font-bold text-amber-900 mb-1 flex items-center gap-1.5">
+              <Clock className="w-3.5 h-3.5 text-amber-600" />
+              <span>آخر أجل لتسجيل التلاميذ والفرق (العداد الزمني)</span>
+            </label>
+            <input
+              type="datetime-local"
+              value={registrationDeadline}
+              onChange={(e) => setRegistrationDeadline(e.target.value)}
+              className="w-full text-xs rounded-lg border border-amber-300 bg-white px-3 py-2 text-slate-800 focus:outline-none focus:ring-2 focus:ring-amber-500 font-semibold"
+            />
+            <p className="text-[10px] text-amber-700 mt-1">
+              بعد هذا الموعد، يقفل نظام التسجيل أوتوماتيكياً أمام الأساتذة ولا يمكن إضافة مشاركين جدد.
+            </p>
+          </div>
+
           {/* Scope & Status */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
@@ -446,7 +702,8 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
                 className="w-full text-xs rounded-lg border border-slate-200 px-3 py-2 text-slate-800 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
               >
                 <option value="Provincial">إقليمية (مديرية تاوريرت)</option>
-                <option value="Regional">تأهيلية جهوية (جهة الشرق)</option>
+                <option value="Regional">جهوية (أكاديمية جهة الشرق)</option>
+                <option value="National">وطنية (الجامعة الملكية المغربية للرياضة المدرسية)</option>
               </select>
             </div>
 
@@ -496,7 +753,7 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
             />
           </div>
 
-          {/* Actions */}
+            {/* Actions */}
           <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-slate-100">
             <button
               type="button"
@@ -505,20 +762,25 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
             >
               إلغاء
             </button>
-            <button
-              type="submit"
-              disabled={isSubmitting}
-              className="px-5 py-2 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors shadow-xs disabled:bg-blue-300 cursor-pointer flex items-center gap-2"
-            >
-              {isSubmitting ? (
-                <>
-                  <div className="h-3 w-3 animate-spin rounded-full border-2 border-white border-t-transparent" />
-                  <span>جاري إنشاء {selectedCategories.length * (genderSelection === 'Both' ? 2 : 1)} بطولات...</span>
-                </>
-              ) : (
-                <span>حفظ وإنشاء {selectedCategories.length * (genderSelection === 'Both' ? 2 : 1)} بطولات</span>
-              )}
-            </button>
+            {(() => {
+              const count = (sportId === 'cross_country' ? 1 : selectedCategories.length * (genderSelection === 'Both' ? 2 : 1)) * (affiliationSelection === 'both' ? 2 : 1);
+              return (
+                <button
+                  type="submit"
+                  disabled={isSubmitting}
+                  className="px-5 py-2 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors shadow-xs disabled:bg-blue-300 cursor-pointer flex items-center gap-2"
+                >
+                  {isSubmitting ? (
+                    <>
+                      <div className="h-3 w-3 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                      <span>جاري إنشاء {count} بطولات...</span>
+                    </>
+                  ) : (
+                    <span>حفظ وإنشاء {count} {count > 1 ? 'بطولات' : 'بطولة'}</span>
+                  )}
+                </button>
+              );
+            })()}
           </div>
         </form>
       </div>

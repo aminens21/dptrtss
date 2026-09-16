@@ -63,13 +63,22 @@ export const Referees: React.FC = () => {
 
   useEffect(() => {
     loadReferees();
+    const handleDirChange = () => {
+      loadReferees();
+    };
+    window.addEventListener('directorateChanged', handleDirChange);
+    return () => {
+      window.removeEventListener('directorateChanged', handleDirChange);
+    };
   }, []);
 
   const loadReferees = async () => {
     setLoading(true);
     try {
+      const activeDirId = DataService.getActiveDirectorateId();
       const data = await DataService.getReferees();
-      setReferees(data);
+      const dirReferees = data.filter(r => (r.directorateId || 'taourirt') === activeDirId);
+      setReferees(dirReferees);
     } catch (error) {
       console.error('Error loading referees:', error);
       toast.error('حدث خطأ أثناء تحميل قائمة الحكام');
@@ -112,7 +121,8 @@ export const Referees: React.FC = () => {
         await DataService.updateReferee(editingRef.id, formData);
         toast.success('تم تحديث بيانات الحكم بنجاح');
       } else {
-        await DataService.addReferee({ ...formData, isActive: true });
+        const activeDirId = DataService.getActiveDirectorateId();
+        await DataService.addReferee({ ...formData, isActive: true, directorateId: activeDirId });
         toast.success('تمت إضافة الحكم بنجاح');
       }
       handleCloseModal();

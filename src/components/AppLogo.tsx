@@ -1,47 +1,68 @@
-import React from 'react';
+import React, { useId } from 'react';
 
 interface AppLogoProps {
   className?: string;
   size?: number | string;
   showText?: boolean;
+  directorateName?: string;
+  variant?: 'light' | 'dark';
 }
 
-export const AppLogo: React.FC<AppLogoProps> = ({ className = '', size = 44, showText = false }) => {
+export const AppLogo: React.FC<AppLogoProps> = ({
+  className = '',
+  size = 52,
+  showText = false,
+  directorateName,
+  variant = 'light'
+}) => {
+  const numericSize = typeof size === 'number' ? size : parseInt(String(size), 10) || 52;
+  const heightValue = numericSize * 1.2;
+  
+  const instanceId = useId().replace(/:/g, '');
+  const shadowId = `logoShadow_${instanceId}`;
+  const goldCrownId = `goldCrown_${instanceId}`;
+  const moroccoRedId = `moroccoRed_${instanceId}`;
+  const moroccoGreenId = `moroccoGreen_${instanceId}`;
+  const skyBlueId = `skyBlue_${instanceId}`;
+  const textPathGreenId = `textPathGreen_${instanceId}`;
+  const textPathRedId = `textPathRed_${instanceId}`;
+
   return (
-    <div className={`inline-flex items-center gap-2.5 ${className}`}>
+    <div className={`inline-flex items-center gap-2.5 shrink-0 ${className}`}>
       <svg
         viewBox="0 0 200 240"
-        width={size}
-        height={typeof size === 'number' ? (size * 1.2) : size}
-        className="shrink-0 drop-shadow-sm transition-transform hover:scale-105"
+        width={numericSize}
+        height={heightValue}
+        style={{ width: `${numericSize}px`, height: `${heightValue}px` }}
+        className="shrink-0 drop-shadow-md transition-transform hover:scale-105 select-none"
         fill="none"
         xmlns="http://www.w3.org/2000/svg"
       >
         <defs>
-          <filter id="logoShadow" x="-10%" y="-10%" width="120%" height="120%">
+          <filter id={shadowId} x="-10%" y="-10%" width="120%" height="120%">
             <feDropShadow dx="0" dy="2" stdDeviation="2.5" floodColor="#000000" floodOpacity="0.25" />
           </filter>
-          <linearGradient id="goldCrown" x1="0%" y1="0%" x2="100%" y2="100%">
+          <linearGradient id={goldCrownId} x1="0%" y1="0%" x2="100%" y2="100%">
             <stop offset="0%" stopColor="#fef08a" />
             <stop offset="50%" stopColor="#eab308" />
             <stop offset="100%" stopColor="#ca8a04" />
           </linearGradient>
-          <linearGradient id="moroccoRed" x1="0%" y1="0%" x2="0%" y2="100%">
+          <linearGradient id={moroccoRedId} x1="0%" y1="0%" x2="0%" y2="100%">
             <stop offset="0%" stopColor="#dc2626" />
             <stop offset="100%" stopColor="#991b1b" />
           </linearGradient>
-          <linearGradient id="moroccoGreen" x1="0%" y1="0%" x2="0%" y2="100%">
+          <linearGradient id={moroccoGreenId} x1="0%" y1="0%" x2="0%" y2="100%">
             <stop offset="0%" stopColor="#15803d" />
             <stop offset="100%" stopColor="#065f46" />
           </linearGradient>
-          <linearGradient id="skyBlue" x1="0%" y1="0%" x2="0%" y2="100%">
+          <linearGradient id={skyBlueId} x1="0%" y1="0%" x2="0%" y2="100%">
             <stop offset="0%" stopColor="#38bdf8" />
             <stop offset="100%" stopColor="#0284c7" />
           </linearGradient>
         </defs>
 
         {/* --- 1. Top Moroccan Crown --- */}
-        <g id="crown" filter="url(#logoShadow)">
+        <g id="crown" filter={`url(#${shadowId})`}>
           {/* Top Green Star */}
           <polygon
             points="100,6 102.5,13.5 110,13.5 104,18 106.5,25.5 100,21 93.5,25.5 96,18 90,13.5 97.5,13.5"
@@ -52,7 +73,7 @@ export const AppLogo: React.FC<AppLogoProps> = ({ className = '', size = 44, sho
           {/* Crown Arch & Pearls */}
           <path
             d="M 85 30 Q 100 18 115 30 Q 128 36 122 46 Q 100 40 78 46 Q 72 36 85 30 Z"
-            fill="url(#goldCrown)"
+            fill={`url(#${goldCrownId})`}
             stroke="#92400e"
             strokeWidth="1.2"
           />
@@ -63,7 +84,7 @@ export const AppLogo: React.FC<AppLogoProps> = ({ className = '', size = 44, sho
           {/* Crown Base */}
           <path
             d="M 76 46 L 124 46 L 121 53 L 79 53 Z"
-            fill="url(#goldCrown)"
+            fill={`url(#${goldCrownId})`}
             stroke="#92400e"
             strokeWidth="1"
           />
@@ -71,8 +92,8 @@ export const AppLogo: React.FC<AppLogoProps> = ({ className = '', size = 44, sho
         </g>
 
         {/* --- 2. Main Circular Red Ring --- */}
-        <g id="main-circle" filter="url(#logoShadow)">
-          <circle cx="100" cy="115" r="62" fill="url(#moroccoRed)" stroke="#ffffff" strokeWidth="2.5" />
+        <g id="main-circle" filter={`url(#${shadowId})`}>
+          <circle cx="100" cy="115" r="62" fill={`url(#${moroccoRedId})`} stroke="#ffffff" strokeWidth="2.5" />
           <circle cx="100" cy="115" r="59" fill="none" stroke="#fef08a" strokeWidth="1" opacity="0.8" />
         </g>
 
@@ -112,7 +133,7 @@ export const AppLogo: React.FC<AppLogoProps> = ({ className = '', size = 44, sho
           <circle cx="100" cy="115" r="37" fill="#ffffff" stroke="#f59e0b" strokeWidth="1.5" />
           
           {/* Upper Sky Hemisphere */}
-          <path d="M 64 115 A 36 36 0 0 1 136 115 Z" fill="url(#skyBlue)" />
+          <path d="M 64 115 A 36 36 0 0 1 136 115 Z" fill={`url(#${skyBlueId})`} />
 
           {/* Lower Running Track Lanes */}
           <path d="M 64 115 A 36 36 0 0 0 136 115 Z" fill="#92400e" />
@@ -122,7 +143,7 @@ export const AppLogo: React.FC<AppLogoProps> = ({ className = '', size = 44, sho
           <line x1="86" y1="143" x2="114" y2="143" stroke="#ffffff" strokeWidth="1.2" opacity="0.8" />
 
           {/* Open White Book */}
-          <g filter="url(#logoShadow)">
+          <g filter={`url(#${shadowId})`}>
             {/* Left Page */}
             <path
               d="M 100 120 C 92 114 77 114 69 119 C 69 104 84 94 100 100 Z"
@@ -148,10 +169,10 @@ export const AppLogo: React.FC<AppLogoProps> = ({ className = '', size = 44, sho
         </g>
 
         {/* --- 5. Green Curved Banner with Arabic Title --- */}
-        <g id="green-banner" filter="url(#logoShadow)">
+        <g id="green-banner" filter={`url(#${shadowId})`}>
           <path
             d="M 15 152 Q 100 206 185 152 L 198 166 Q 100 226 2 166 Z"
-            fill="url(#moroccoGreen)"
+            fill={`url(#${moroccoGreenId})`}
             stroke="#ffffff"
             strokeWidth="1.5"
           />
@@ -164,19 +185,19 @@ export const AppLogo: React.FC<AppLogoProps> = ({ className = '', size = 44, sho
           />
           {/* Arabic Text curved along banner */}
           <path
-            id="textPathGreen"
+            id={textPathGreenId}
             d="M 18 162 Q 100 216 182 162"
             fill="none"
           />
           <text fill="#ffffff" fontSize="8.5" fontWeight="900" fontFamily="'Tajawal', 'Cairo', sans-serif">
-            <textPath href="#textPathGreen" startOffset="50%" textAnchor="middle">
+            <textPath href={`#${textPathGreenId}`} startOffset="50%" textAnchor="middle">
               الفرع الإقليمي للجامعة الملكية للرياضة المدرسية
             </textPath>
           </text>
         </g>
 
         {/* --- 6. Bottom Red Ribbon (F.R.M.S.S.) --- */}
-        <g id="red-ribbon" filter="url(#logoShadow)">
+        <g id="red-ribbon" filter={`url(#${shadowId})`}>
           {/* Green Ribbon Tails */}
           <path d="M 28 200 L 46 195 L 42 225 L 22 226 L 31 213 Z" fill="#065f46" stroke="#ffffff" strokeWidth="0.8" />
           <path d="M 172 200 L 154 195 L 158 225 L 178 226 L 169 213 Z" fill="#065f46" stroke="#ffffff" strokeWidth="0.8" />
@@ -184,18 +205,18 @@ export const AppLogo: React.FC<AppLogoProps> = ({ className = '', size = 44, sho
           {/* Central Red Ribbon */}
           <path
             d="M 36 195 Q 100 230 164 195 L 160 218 Q 100 252 40 218 Z"
-            fill="url(#moroccoRed)"
+            fill={`url(#${moroccoRedId})`}
             stroke="#ffffff"
             strokeWidth="1.2"
           />
           {/* FRMSS Acronym Text */}
           <path
-            id="textPathRed"
+            id={textPathRedId}
             d="M 40 210 Q 100 242 160 210"
             fill="none"
           />
           <text fill="#ffffff" fontSize="13" fontWeight="900" letterSpacing="3.5" fontFamily="'Arial Black', 'Trebuchet MS', sans-serif">
-            <textPath href="#textPathRed" startOffset="50%" textAnchor="middle">
+            <textPath href={`#${textPathRedId}`} startOffset="50%" textAnchor="middle">
               F.R.M.S.S.
             </textPath>
           </text>
@@ -203,9 +224,13 @@ export const AppLogo: React.FC<AppLogoProps> = ({ className = '', size = 44, sho
       </svg>
 
       {showText && (
-        <div className="flex flex-col text-right">
-          <span className="text-sm font-black text-slate-900 leading-tight">الفرع الإقليمي للجامعة الملكية</span>
-          <span className="text-xs font-bold text-blue-700 leading-none">للرياضة المدرسية • تاوريرت</span>
+        <div className="flex flex-col text-right min-w-0 select-none">
+          <span className={`text-xs sm:text-sm font-black leading-tight truncate ${variant === 'dark' ? 'text-white' : 'text-slate-900'}`}>
+            الجامعة الملكية المغربية للرياضة المدرسية
+          </span>
+          <span className={`text-[10px] sm:text-xs font-bold leading-tight truncate ${variant === 'dark' ? 'text-blue-300' : 'text-blue-700'}`}>
+            الفرع الإقليمي {directorateName ? `• ${directorateName}` : ''}
+          </span>
         </div>
       )}
     </div>

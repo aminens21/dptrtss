@@ -45,17 +45,27 @@ export const TechCommitteeHeads: React.FC = () => {
   const [selectedMemberIdForModal, setSelectedMemberIdForModal] = useState('');
   const [isSubmittingMemberModal, setIsSubmittingMemberModal] = useState(false);
 
-  const isCentralAdmin = userProfile?.role === 'CENTRAL_ADMIN';
+  const isCentralAdmin = userProfile?.role === 'CENTRAL_ADMIN' || userProfile?.isSuperAdmin || userProfile?.role === 'SPORT_MANAGER';
+  const canManageTechCommittee = isCentralAdmin;
 
   useEffect(() => {
     loadData();
+    const handleDirChange = () => {
+      loadData();
+    };
+    window.addEventListener('directorateChanged', handleDirChange);
+    return () => {
+      window.removeEventListener('directorateChanged', handleDirChange);
+    };
   }, []);
 
   const loadData = async () => {
     setLoading(true);
     try {
+      const activeDirId = DataService.getActiveDirectorateId();
       const allTeachers = await DataService.getTeachers();
-      setTeachers(allTeachers);
+      const dirTeachers = allTeachers.filter(t => (t.directorateId || 'taourirt') === activeDirId);
+      setTeachers(dirTeachers);
     } catch (error) {
       console.error('Error loading teachers data:', error);
       toast.error('حدث خطأ أثناء تحميل البيانات');

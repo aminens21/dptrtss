@@ -1,8 +1,9 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import { DataService, SPORTS_MAP, AGE_CATEGORIES, getAgeCategoriesForSeason } from '../lib/dataService';
-import { Student, Sport, Tournament } from '../types';
+import { DataService, SPORTS_MAP, AGE_CATEGORIES, getAgeCategoriesForSeason, getCategoryGenderLabel, isClubTournament, normalizeCategoryKey } from '../lib/dataService';
+import { Student, Sport, Tournament, School, Directorate } from '../types';
+import { ParticipationFormPdfModal } from '../components/ParticipationFormPdfModal';
 import {
   Users,
   Plus,
@@ -20,7 +21,10 @@ import {
   RefreshCw,
   Search,
   CheckCircle2,
-  Trophy
+  Trophy,
+  FileText,
+  Download,
+  Printer
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
@@ -34,6 +38,7 @@ export const TeacherTeams: React.FC = () => {
   const [sportsConfig, setSportsConfig] = useState<Sport[]>([]);
   const [students, setStudents] = useState<Student[]>([]);
   const [tournaments, setTournaments] = useState<Tournament[]>([]);
+  const [schools, setSchools] = useState<School[]>([]);
   const [loading, setLoading] = useState(true);
   const [currentSeason, setCurrentSeason] = useState('2026/2027');
 
@@ -42,9 +47,8 @@ export const TeacherTeams: React.FC = () => {
   const [sportTabFilter, setSportTabFilter] = useState<'PROGRAMMED' | 'NON_PROGRAMMED' | 'ALL'>('PROGRAMMED');
 
   const isSportProgrammed = (s: Sport): boolean => {
-    if (s.isProgrammed !== undefined) return s.isProgrammed;
-    if (s.id === 'cross_country') return true;
     if (tournaments.some(t => t.sportId === s.id)) return true;
+    if (s.isProgrammed !== undefined) return s.isProgrammed;
     return (s.ageCategories && s.ageCategories.length > 0 && s.studentLimit !== undefined && s.studentLimit > 0) || false;
   };
 
@@ -61,42 +65,129 @@ export const TeacherTeams: React.FC = () => {
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [editingStudentId, setEditingStudentId] = useState<string | null>(null);
   const [fullName, setFullName] = useState('');
+  const [massarNumber, setMassarNumber] = useState('');
+  const [selectedSchoolId, setSelectedSchoolId] = useState<string>('');
   const [gender, setGender] = useState<'Male' | 'Female'>('Male');
   const [birthDate, setBirthDate] = useState('');
   const [category, setCategory] = useState('');
   const [participationType, setParticipationType] = useState<'individual' | 'school_team'>('individual');
   const [athleticsSpecialty, setAthleticsSpecialty] = useState('');
   const [photo, setPhoto] = useState<string>('');
+  const [coachName, setCoachName] = useState('');
+  const [coachLeaseNumber, setCoachLeaseNumber] = useState('');
+  const [coachPhone, setCoachPhone] = useState('');
   const [uploading, setUploading] = useState(false);
   const [studentToDeleteId, setStudentToDeleteId] = useState<string | null>(null);
 
+  // Category Coaches states
+  const [predefinedCoaches, setPredefinedCoaches] = useState<Record<string, { coachName: string; coachLeaseNumber: string; coachPhone: string }>>({});
+  const [editingCoachKey, setEditingCoachKey] = useState<string | null>(null);
+  const [tempCoachName, setTempCoachName] = useState('');
+  const [tempCoachLease, setTempCoachLease] = useState('');
+  const [tempCoachPhone, setTempCoachPhone] = useState('');
+
+  // PDF Export Modal State
+  const [isPdfModalOpen, setIsPdfModalOpen] = useState(false);
+  const [activeDirectorateObj, setActiveDirectorateObj] = useState<Directorate | null>(null);
+  const [showOnlyParticipatingCoaches, setShowOnlyParticipatingCoaches] = useState(true);
+
   // Verification: Teacher profile completeness
-  const isProfileIncomplete = userProfile?.role === 'TEACHER' && (!userProfile.workLocation || !userProfile.leaseNumber);
-  const schoolName = userProfile?.workLocation || urlSchool || 'مؤسسة غير محددة';
+  const isTeacher = userProfile?.role === 'TEACHER';
+  const isProfileIncomplete = isTeacher && (!userProfile.workLocation || !userProfile.leaseNumber) &&
+    sessionStorage.getItem('teacher_profile_prompt_dismissed') !== 'true' &&
+    localStorage.getItem('teacher_profile_prompt_dismissed_global') !== 'true';
+  const schoolName = userProfile?.workLocation || urlSchool || '';
 
   useEffect(() => {
     loadInitialData();
-  }, []);
+    const handleDirChange = () => {
+      loadInitialData();
+    };
+    window.addEventListener('directorateChanged', handleDirChange);
+
+    // Real-time live synchronization for students and schools across devices
+    const unsubStudents = DataService.subscribeToStudents((allStudents) => {
+      const activeDirId = DataService.getActiveDirectorateId();
+      const dirStudents = allStudents.filter(st => (st.directorateId || 'taourirt') === activeDirId);
+      const targetSchool = isTeacher ? userProfile?.workLocation : (userProfile?.workLocation || urlSchool);
+      if (isTeacher) {
+        if (userProfile?.workLocation) {
+          setStudents(dirStudents.filter(s => s.schoolName === userProfile.workLocation));
+        }
+      } else if (targetSchool) {
+        setStudents(dirStudents.filter(s => s.schoolName === targetSchool));
+      } else {
+        setStudents(dirStudents);
+      }
+    });
+
+    const unsubSchools = DataService.subscribeToSchools((schoolList) => {
+      const activeDirId = DataService.getActiveDirectorateId();
+      const dirSchools = schoolList.filter(sch => (sch.directorateId || 'taourirt') === activeDirId);
+      setSchools(dirSchools);
+    });
+
+    return () => {
+      window.removeEventListener('directorateChanged', handleDirChange);
+      unsubStudents();
+      unsubSchools();
+    };
+  }, [userProfile, urlSchool]);
 
   const loadInitialData = async () => {
     setLoading(true);
     try {
-      const [config, allStudents, season, tournList] = await Promise.all([
+      const activeDirId = DataService.getActiveDirectorateId();
+      const [config, allStudents, season, tournList, schoolList, activeDir] = await Promise.all([
         DataService.getSportsConfig(),
         DataService.getStudents(),
         DataService.getActiveSeason(),
-        DataService.getTournaments()
+        DataService.getTournaments(),
+        DataService.getSchools(),
+        DataService.getActiveDirectorate()
       ]);
+
+      setActiveDirectorateObj(activeDir);
+      const dirSchools = schoolList.filter(sch => (sch.directorateId || 'taourirt') === activeDirId);
+      const dirStudents = allStudents.filter(st => (st.directorateId || 'taourirt') === activeDirId);
+
+      const dirTournaments = tournList.filter(t => (t.directorateId || 'taourirt') === activeDirId);
+
       setSportsConfig(config);
       setCurrentSeason(season);
-      setTournaments(tournList);
+      setTournaments(dirTournaments);
+      setSchools(dirSchools);
       
-      // Filter students of this teacher's school only, or from urlSchool if specified
-      const targetSchool = userProfile?.workLocation || urlSchool;
+      // For teachers, strictly lock school to their registered workLocation
+      const targetSchool = isTeacher ? userProfile?.workLocation : (userProfile?.workLocation || urlSchool);
       if (targetSchool) {
-        setStudents(allStudents.filter(s => s.schoolName === targetSchool));
+        const matched = dirSchools.find(s => 
+          s.name && (
+            s.name.trim().toLowerCase() === targetSchool.trim().toLowerCase() ||
+            s.name.includes(targetSchool) ||
+            targetSchool.includes(s.name)
+          )
+        );
+        if (matched) {
+          setSelectedSchoolId(matched.id);
+        } else if (dirSchools.length > 0) {
+          setSelectedSchoolId(dirSchools[0].id);
+        }
+      } else if (dirSchools.length > 0) {
+        setSelectedSchoolId(dirSchools[0].id);
+      }
+
+      // Filter students: Teachers can ONLY see and manage students of their own institution
+      if (isTeacher) {
+        if (userProfile?.workLocation) {
+          setStudents(dirStudents.filter(s => s.schoolName === userProfile.workLocation));
+        } else {
+          setStudents([]);
+        }
+      } else if (targetSchool) {
+        setStudents(dirStudents.filter(s => s.schoolName === targetSchool));
       } else {
-        setStudents(allStudents);
+        setStudents(dirStudents);
       }
 
       if (urlSport) {
@@ -226,11 +317,47 @@ export const TeacherTeams: React.FC = () => {
       return;
     }
 
+    const activeTourn = getSportTournament(selectedSportId);
+    if (activeTourn?.status === 'Completed' || activeTourn?.status === 'Archived') {
+      toast.error('البطولة منتهية ومؤرشفة نهائياً للنتائج، ولا يمكن إضافة تلاميذ جديدين.');
+      return;
+    }
+
+    if (activeTourn?.status === 'Ongoing' && isTeacher) {
+      toast.error('البطولة جارية حالياً ومغلقة أمام تسجيل الأساتذة، ومتاحة فقط للمسؤول الإقليمي أو المركزي لاستكمال اللوائح.');
+      return;
+    }
+
     setEditingStudentId(null);
     setFullName('');
+    setMassarNumber('');
     setBirthDate('');
     setPhoto('');
     setAthleticsSpecialty('');
+    
+    // Default the coach fields to current user profile
+    setCoachName(userProfile?.fullName || '');
+    setCoachLeaseNumber(userProfile?.leaseNumber || '');
+    setCoachPhone(userProfile?.phone || '');
+    
+    // Auto-select school: for teachers, strictly their workLocation
+    const targetSchool = isTeacher ? userProfile?.workLocation : (userProfile?.workLocation || urlSchool);
+    if (targetSchool) {
+      const matched = schools.find(s => 
+        s.name && (
+          s.name.trim().toLowerCase() === targetSchool.trim().toLowerCase() ||
+          s.name.includes(targetSchool) ||
+          targetSchool.includes(s.name)
+        )
+      );
+      if (matched) {
+        setSelectedSchoolId(matched.id);
+      } else if (schools.length > 0 && !selectedSchoolId) {
+        setSelectedSchoolId(schools[0].id);
+      }
+    } else if (schools.length > 0 && !selectedSchoolId) {
+      setSelectedSchoolId(schools[0].id);
+    }
     
     const sport = sportsConfig.find(s => s.id === selectedSportId);
     if (sport && sport.ageCategories && sport.ageCategories.length > 0) {
@@ -242,12 +369,54 @@ export const TeacherTeams: React.FC = () => {
     setIsFormOpen(true);
   };
 
+  const canTeacherManageStudent = (student: Student) => {
+    if (!isTeacher) return true; // Central admin, etc. can manage everything
+    if (!userProfile) return false;
+    
+    // 1. Check unique lease number if both have it
+    if (student.coachLeaseNumber && userProfile.leaseNumber && student.coachLeaseNumber.trim() === userProfile.leaseNumber.trim()) {
+      return true;
+    }
+    
+    // 2. Check trimmed case-insensitive school names
+    const cleanStudentSchool = (student.schoolName || '').trim().toLowerCase();
+    const cleanTeacherSchool = (userProfile.workLocation || '').trim().toLowerCase();
+    if (cleanStudentSchool && cleanTeacherSchool && cleanStudentSchool === cleanTeacherSchool) {
+      return true;
+    }
+    
+    // 3. Check if school names are substrings of each other
+    if (cleanStudentSchool && cleanTeacherSchool && (cleanStudentSchool.includes(cleanTeacherSchool) || cleanTeacherSchool.includes(cleanStudentSchool))) {
+      return true;
+    }
+
+    // 4. Check if student's schoolId matches resolved school id for teacher
+    const matched = schools.find(s => s.name === userProfile.workLocation || s.name.includes(userProfile.workLocation || ''));
+    const teacherSchoolId = matched ? matched.id : (userProfile.id || `sch-${(userProfile.workLocation || '').replace(/\s+/g, '-')}`);
+    if (student.schoolId && teacherSchoolId && student.schoolId === teacherSchoolId) {
+      return true;
+    }
+
+    return false;
+  };
+
   const handleEditStudent = (student: Student) => {
+    if (!canTeacherManageStudent(student)) {
+      toast.error('غير مسموح لك بتعديل بيانات تلميذ يتبع لمؤسسة أخرى.');
+      return;
+    }
     setEditingStudentId(student.id);
     setFullName(student.fullName);
+    setMassarNumber(student.massarNumber || '');
     setGender(student.gender);
     setBirthDate(student.birthDate);
     setCategory(student.category);
+    if (student.schoolId) {
+      setSelectedSchoolId(student.schoolId);
+    } else if (student.schoolName) {
+      const matched = schools.find(s => s.name === student.schoolName || s.id === student.schoolId);
+      if (matched) setSelectedSchoolId(matched.id);
+    }
     if (student.participationType) {
       setParticipationType(student.participationType);
     }
@@ -257,6 +426,12 @@ export const TeacherTeams: React.FC = () => {
     } else {
       setAthleticsSpecialty('');
     }
+    
+    // Load saved coach details or default to logged-in user profile
+    setCoachName(student.coachName || userProfile?.fullName || '');
+    setCoachLeaseNumber(student.coachLeaseNumber || userProfile?.leaseNumber || '');
+    setCoachPhone(student.coachPhone || userProfile?.phone || '');
+    
     setIsFormOpen(true);
   };
 
@@ -376,13 +551,43 @@ export const TeacherTeams: React.FC = () => {
     }
 
     try {
+      let resolvedSchoolName = schoolName;
+      let resolvedSchoolId = selectedSchoolId;
+
+      if (isTeacher) {
+        if (!userProfile?.workLocation) {
+          toast.error('يرجى استكمال مقر العمل (المؤسسة التعليمية) في ملفكم الشخصي أولاً.');
+          return;
+        }
+        resolvedSchoolName = userProfile.workLocation;
+        const matched = schools.find(s => s.name === userProfile.workLocation || s.name.includes(userProfile.workLocation!));
+        resolvedSchoolId = matched ? matched.id : (userProfile.id || `sch-${userProfile.workLocation.replace(/\s+/g, '-')}`);
+      } else {
+        const chosenSchool = schools.find(s => s.id === selectedSchoolId);
+        resolvedSchoolName = chosenSchool ? chosenSchool.name : (userProfile?.workLocation || schoolName);
+        resolvedSchoolId = chosenSchool ? chosenSchool.id : (userProfile?.id || 'unknown_school');
+      }
+
+      const coachKey = `${category}_${gender}`;
+      const coachInfo = effectiveCoaches[coachKey] || {
+        coachName: userProfile?.fullName || '',
+        coachLeaseNumber: userProfile?.leaseNumber || '',
+        coachPhone: userProfile?.phone || ''
+      };
+
       if (editingStudentId) {
         const studentData: Partial<Student> = {
           fullName: fullName.trim(),
+          massarNumber: massarNumber.trim() || undefined,
           gender,
           birthDate,
           category,
+          schoolId: resolvedSchoolId,
+          schoolName: resolvedSchoolName,
           photoUrl: photo || undefined,
+          coachName: coachInfo.coachName ? coachInfo.coachName.trim() : undefined,
+          coachLeaseNumber: coachInfo.coachLeaseNumber ? coachInfo.coachLeaseNumber.trim() : undefined,
+          coachPhone: coachInfo.coachPhone ? coachInfo.coachPhone.trim() : undefined,
           ...(selectedSportId === 'cross_country' ? {
             participationType,
             distance: getCrossCountryDistance(category, gender)
@@ -399,13 +604,17 @@ export const TeacherTeams: React.FC = () => {
       } else {
         const studentData: Omit<Student, 'id' | 'createdAt' | 'updatedAt'> = {
           fullName: fullName.trim(),
+          massarNumber: massarNumber.trim() || undefined,
           gender,
           birthDate,
           category,
-          schoolId: userProfile?.id || 'unknown_school',
-          schoolName: schoolName,
+          schoolId: resolvedSchoolId,
+          schoolName: resolvedSchoolName,
           sportId: selectedSportId,
           photoUrl: photo || undefined,
+          coachName: coachInfo.coachName ? coachInfo.coachName.trim() : undefined,
+          coachLeaseNumber: coachInfo.coachLeaseNumber ? coachInfo.coachLeaseNumber.trim() : undefined,
+          coachPhone: coachInfo.coachPhone ? coachInfo.coachPhone.trim() : undefined,
           ...(selectedSportId === 'cross_country' ? {
             participationType,
             distance: getCrossCountryDistance(category, gender)
@@ -423,9 +632,13 @@ export const TeacherTeams: React.FC = () => {
       
       // Reset Form
       setFullName('');
+      setMassarNumber('');
       setBirthDate('');
       setPhoto('');
       setAthleticsSpecialty('');
+      setCoachName('');
+      setCoachLeaseNumber('');
+      setCoachPhone('');
       setEditingStudentId(null);
       setIsFormOpen(false);
     } catch (error) {
@@ -435,6 +648,11 @@ export const TeacherTeams: React.FC = () => {
   };
 
   const handleDeleteStudent = (studentId: string) => {
+    const student = students.find(s => s.id === studentId);
+    if (student && !canTeacherManageStudent(student)) {
+      toast.error('غير مسموح لك بحذف تلميذ يتبع لمؤسسة أخرى.');
+      return;
+    }
     setStudentToDeleteId(studentId);
   };
 
@@ -456,18 +674,56 @@ export const TeacherTeams: React.FC = () => {
   const getSportName = (id: string) => SPORTS_MAP[id]?.name || id;
   const getSportIcon = (id: string) => SPORTS_MAP[id]?.icon || '🏆';
   
-  const getCategoryLabel = (catId: string) => {
-    const seasonalCats = getAgeCategoriesForSeason(currentSeason);
-    const found = seasonalCats.find(c => c.id === catId);
-    return found ? found.name : catId;
+  const getCategoryLabel = (catId: string, gender?: string) => {
+    return getCategoryGenderLabel(catId, gender);
   };
 
   // Filter students for the currently selected sport
   const activeSportStudents = students.filter(s => s.sportId === selectedSportId);
 
+  const effectiveCoaches = useMemo(() => {
+    const coaches: Record<string, { coachName: string; coachLeaseNumber: string; coachPhone: string }> = {};
+    
+    // First, fill using the existing student data (from DB)
+    activeSportStudents.forEach(s => {
+      const normCat = normalizeCategoryKey(s.category);
+      const key = `${normCat}_${s.gender}`;
+      if (s.coachName && !coaches[key]) {
+        coaches[key] = {
+          coachName: s.coachName,
+          coachLeaseNumber: s.coachLeaseNumber || '',
+          coachPhone: s.coachPhone || ''
+        };
+      }
+    });
+
+    // Second, merge with predefinedCoaches set by the user during this session
+    Object.keys(predefinedCoaches).forEach(key => {
+      if (predefinedCoaches[key]?.coachName) {
+        coaches[key] = predefinedCoaches[key];
+      }
+    });
+
+    return coaches;
+  }, [activeSportStudents, predefinedCoaches]);
+
   // Active Sport Configuration
   const activeSportConfig = sportsConfig.find(s => s.id === selectedSportId);
-  const activeSportCategories = activeSportConfig?.ageCategories || [];
+  const activeSportCategories = useMemo(() => {
+    let rawCats: string[] = [];
+    if (activeSportConfig?.ageCategories && activeSportConfig.ageCategories.length > 0) {
+      rawCats = activeSportConfig.ageCategories;
+    } else {
+      const tournCats = tournaments.filter(t => t.sportId === selectedSportId).map(t => t.ageCategory).filter(Boolean);
+      if (tournCats.length > 0) {
+        rawCats = tournCats;
+      } else {
+        rawCats = getAgeCategoriesForSeason(currentSeason).map(c => c.id);
+      }
+    }
+    const normalized = rawCats.map(c => normalizeCategoryKey(c));
+    return Array.from(new Set(normalized));
+  }, [activeSportConfig, tournaments, selectedSportId, currentSeason]);
 
   // Real-time limit checking for rendering warning indicators
   const isGeneralLimitReached = (() => {
@@ -504,50 +760,72 @@ export const TeacherTeams: React.FC = () => {
     );
   }
 
-  // If profile is incomplete, force profile updates
+  // Render sports cards distinguishing white (non-club) vs yellow (club-affiliated)
   const renderSportCard = (sport: Sport) => {
     const mapped = SPORTS_MAP[sport.id] || { name: sport.name, icon: '🏆' };
     const count = students.filter(s => s.sportId === sport.id).length;
     const hasConfiguredCategories = sport.ageCategories && sport.ageCategories.length > 0;
     const isProgrammed = isSportProgrammed(sport);
 
+    const sportTourns = tournaments.filter(t => t.sportId === sport.id);
+    const mainTourn = sportTourns.length > 0 ? sportTourns[0] : null;
+    
+    const sportStudents = students.filter(s => s.sportId === sport.id);
+    const isClub = sportStudents.length > 0 
+      ? sportStudents.some(s => s.affiliationType === 'club_affiliated')
+      : isClubTournament(mainTourn);
+
     return (
       <div
         key={sport.id}
         onClick={() => handleSelectSport(sport.id)}
-        className={`bg-white rounded-2xl border p-5 transition-all cursor-pointer flex flex-col justify-between h-48 group relative overflow-hidden ${
-          isProgrammed
-            ? 'border-emerald-200 hover:border-emerald-500 hover:shadow-md bg-gradient-to-b from-white to-emerald-50/20'
-            : 'border-slate-200/80 hover:border-amber-400 hover:shadow-xs opacity-90'
+        className={`rounded-2xl border p-5 transition-all cursor-pointer flex flex-col justify-between h-52 group relative overflow-hidden shadow-xs ${
+          isClub
+            ? 'bg-amber-50/90 border-amber-300 hover:border-amber-500 hover:shadow-md'
+            : 'bg-white border-slate-200/90 hover:border-blue-400 hover:shadow-md'
         }`}
       >
         <div className="absolute top-0 right-0 w-24 h-24 bg-blue-500/5 rounded-full -mr-8 -mt-8 group-hover:scale-125 transition-transform" />
         
         <div className="space-y-2">
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between gap-1 flex-wrap">
             <span className="text-3xl block">{mapped.icon}</span>
-            {isProgrammed ? (
-              <span className="text-[9px] font-black px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-200 shadow-xs">
-                ✅ بطولة مبرمجة
-              </span>
-            ) : (
-              <span className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-900 border border-amber-200">
-                ⏳ غير مبرمجة بعد
-              </span>
-            )}
+            <div className="flex items-center gap-1">
+              {isClub ? (
+                <span className="text-[9px] font-extrabold px-2 py-0.5 rounded-full bg-amber-200 text-amber-950 border border-amber-400 shadow-3xs">
+                  🟡 للمنتمين للأندية
+                </span>
+              ) : (
+                <span className="text-[9px] font-extrabold px-2 py-0.5 rounded-full bg-slate-100 text-slate-800 border border-slate-300 shadow-3xs">
+                  ⚪ لغير المنتمين (العموميون)
+                </span>
+              )}
+              {isProgrammed && (
+                <span className="text-[9px] font-black px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-200">
+                  ✅ مبرمجة
+                </span>
+              )}
+            </div>
           </div>
           
           <h4 className="text-xs md:text-sm font-bold text-slate-800 group-hover:text-blue-600 transition-colors">
             {mapped.name}
           </h4>
-          <p className="text-[10px] text-slate-400 font-medium line-clamp-1">
-            {hasConfiguredCategories 
-              ? `الفئات: ${sport.ageCategories?.map(getCategoryLabel).join(' - ')}`
-              : 'لم يتم تفعيل أي فئة'}
+          <p className="text-[10px] text-slate-500 font-medium line-clamp-1">
+            {(() => {
+              const sportStudents = students.filter(s => s.sportId === sport.id);
+              const uniqueParticipatingCats = Array.from(new Set(sportStudents.map(s => s.category).filter(Boolean))) as string[];
+              if (uniqueParticipatingCats.length > 0) {
+                return `الفئات المشارك فيها: ${uniqueParticipatingCats.map(c => getCategoryGenderLabel(c)).join(' - ')}`;
+              }
+              return hasConfiguredCategories
+                ? `الفئات المتاحة: ${sport.ageCategories?.map(c => getCategoryGenderLabel(c)).join(' - ')}`
+                : 'لم يتم تفعيل أي فئة';
+            })()}
           </p>
         </div>
 
-        <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-[11px]">
+        <div className="pt-2 border-t border-slate-200/60 flex items-center justify-between text-[11px]">
           <span className="text-slate-500 font-bold">المسجلون بالفريق:</span>
           <span className={`font-bold px-2 py-0.5 rounded border ${
             count > 0 ? 'text-blue-700 bg-blue-50 border-blue-200' : 'text-slate-400 bg-slate-50 border-slate-200'
@@ -668,10 +946,19 @@ export const TeacherTeams: React.FC = () => {
               </div>
             </div>
 
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <span className="text-xs bg-slate-800 px-3 py-1.5 rounded-xl border border-slate-700 font-bold">
                 إجمالي التلاميذ: {activeSportStudents.length}
               </span>
+              <button
+                onClick={() => setIsPdfModalOpen(true)}
+                disabled={activeSportStudents.length === 0}
+                title={activeSportStudents.length === 0 ? 'يرجى تسجيل تلاميذ أولاً لعرض المطبوع' : 'معاينة وعرض لائحة المشاركة الرسمية للطباعة والتحميل'}
+                className="bg-sky-700 hover:bg-sky-600 text-white font-bold text-xs px-3.5 py-2 rounded-xl shadow-xs flex items-center gap-1.5 transition-all disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+              >
+                <FileText className="h-4 w-4" />
+                <span>عرض لائحة المشاركة</span>
+              </button>
               <button
                 onClick={handleOpenNewStudentForm}
                 disabled={!activeSportCategories || activeSportCategories.length === 0 || !activeSportConfig || !isSportProgrammed(activeSportConfig)}
@@ -696,6 +983,50 @@ export const TeacherTeams: React.FC = () => {
               </div>
             </div>
           )}
+
+          {/* Status Banners: Open (🟢), Ongoing (🔵), Completed (🏆) */}
+          {activeSportConfig && isSportProgrammed(activeSportConfig) && (() => {
+            const activeTourn = getSportTournament(selectedSportId);
+            const statusVal = activeTourn?.status || 'Scheduled';
+
+            if (statusVal === 'Ongoing') {
+              return (
+                <div className="p-4 bg-blue-50 border border-blue-200 rounded-2xl flex items-start gap-3 text-blue-950 text-xs leading-relaxed shadow-3xs">
+                  <AlertCircle className="h-5 w-5 shrink-0 text-blue-600 mt-0.5" />
+                  <div>
+                    <p className="font-extrabold text-sm text-blue-950">🔵 بطولة جارية حالياً (In Progress)</p>
+                    <p className="mt-1 text-blue-900 font-medium">
+                      تُعرض هذه البطولة لجميع الأطر والأساتذة لمتابعة المنافسات والبرمجة.
+                      {isTeacher
+                        ? ' تم إقفال باب الإضافة والعدل النهائي أمام الأساتذة، ويُتاح التعديل الاستثنائي فقط للمسؤول الإقليمي أو المركزي.'
+                        : ' بصفتك مسؤولاً إقليمياً أو مركزياً، يُمكِنُك الاستمرار في استكمال وتعديل اللوائح للأساتذة.'}
+                    </p>
+                  </div>
+                </div>
+              );
+            } else if (statusVal === 'Completed' || statusVal === 'Archived') {
+              return (
+                <div className="p-4 bg-amber-50 border border-amber-300 rounded-2xl flex items-start gap-3 text-amber-950 text-xs leading-relaxed shadow-3xs">
+                  <Trophy className="h-5 w-5 shrink-0 text-amber-600 mt-0.5" />
+                  <div>
+                    <p className="font-extrabold text-sm text-amber-950">🏆 بطولة منتهية ومؤرشفة للنتائج (Completed)</p>
+                    <p className="mt-1 text-amber-900 font-medium">
+                      هذه البطولة منتهية ومؤرشفة نهائياً لعرض نتائج المباريات والتتويجات، وتم إغلاق التسجيل نهائياً لجميع المستخدمين.
+                    </p>
+                  </div>
+                </div>
+              );
+            } else {
+              return (
+                <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-2xl flex items-center gap-3 text-emerald-950 text-xs shadow-3xs">
+                  <span className="text-base">🟢</span>
+                  <p className="font-bold text-emerald-900 text-xs">
+                    مفتوحة للتسجيل: تظهر لجميع الأطر والأساتذة ومفتوحة لتسجيل المؤسسات واللوائح حتى انتهاء الأجل.
+                  </p>
+                </div>
+              );
+            }
+          })()}
 
           {/* Alert if sport categories aren't configured yet */}
           {(!activeSportCategories || activeSportCategories.length === 0) && (
@@ -753,6 +1084,49 @@ export const TeacherTeams: React.FC = () => {
                 )}
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {/* School Selection: Locked for teachers to their registered institution */}
+                  <div className="md:col-span-2">
+                    <label className="block text-xs font-bold text-slate-700 mb-1.5 flex items-center justify-between">
+                      <span className="flex items-center gap-1.5">
+                        <Building className="h-3.5 w-3.5 text-blue-600" />
+                        <span>المؤسسة التعليمية *</span>
+                      </span>
+                      {isTeacher ? (
+                        <span className="text-[10px] text-emerald-700 font-bold bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+                          مؤسستك المعتمدة فقط
+                        </span>
+                      ) : (
+                        <span className="text-[10px] text-blue-600 font-bold bg-blue-50 px-2 py-0.5 rounded border border-blue-200">
+                          اختيار من المؤسسات المعتمدة بالإقليم
+                        </span>
+                      )}
+                    </label>
+                    {isTeacher ? (
+                      <div className="w-full text-xs px-3.5 py-3 bg-slate-50 border border-slate-200 rounded-xl flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <Building className="h-4 w-4 text-emerald-600" />
+                          <span className="font-bold text-slate-800">{userProfile?.workLocation || schoolName}</span>
+                          <span className="text-[10px] bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded font-bold">مؤسستك المسجلة</span>
+                        </div>
+                        <span className="text-[10px] text-slate-400 font-medium">مغلق (حصراً لمؤسستك)</span>
+                      </div>
+                    ) : (
+                      <select
+                        required
+                        className="w-full text-xs px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all font-semibold text-slate-700"
+                        value={selectedSchoolId}
+                        onChange={(e) => setSelectedSchoolId(e.target.value)}
+                      >
+                        <option value="">-- اختر المؤسسة التعليمية للتلميذ --</option>
+                        {schools.map((sch) => (
+                          <option key={sch.id} value={sch.id}>
+                            {sch.name} ({sch.type === 'تأهيلي' ? 'ثانوي تأهيلي' : sch.type === 'إعدادي' ? 'ثانوي إعدادي' : 'ابتدائي'} - {sch.commune})
+                          </option>
+                        ))}
+                      </select>
+                    )}
+                  </div>
+
                   {/* Name and Surname */}
                   <div>
                     <label className="block text-xs font-bold text-slate-700 mb-1.5">
@@ -765,6 +1139,25 @@ export const TeacherTeams: React.FC = () => {
                       className="w-full text-xs px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all font-medium"
                       value={fullName}
                       onChange={(e) => setFullName(e.target.value)}
+                    />
+                  </div>
+
+                  {/* Massar Number */}
+                  <div>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <label className="block text-xs font-bold text-slate-700">
+                        رقم مسار (Code Massar)
+                      </label>
+                      <span className="text-[10px] text-slate-400 font-medium">
+                        اختياري / يُدرج بمطبوع المشاركة
+                      </span>
+                    </div>
+                    <input
+                      type="text"
+                      placeholder="مثال: G134567890 أو F123456789"
+                      className="w-full text-xs px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all font-mono uppercase"
+                      value={massarNumber}
+                      onChange={(e) => setMassarNumber(e.target.value.toUpperCase())}
                     />
                   </div>
 
@@ -970,6 +1363,8 @@ export const TeacherTeams: React.FC = () => {
                       </div>
                     </div>
                   </div>
+
+
                 </div>
 
                 <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-slate-100">
@@ -993,120 +1388,452 @@ export const TeacherTeams: React.FC = () => {
             </div>
           )}
 
+          {/* Category Coaches Management Section */}
+          {selectedSportId && activeSportCategories && activeSportCategories.length > 0 && (
+            <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs p-5 space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-3">
+                <div>
+                  <h4 className="text-xs md:text-sm font-bold text-slate-800 flex items-center gap-2">
+                    <span>👨‍🏫</span>
+                    <span>الأساتذة المؤطرون حسب فئات وصنوف الفريق</span>
+                  </h4>
+                  <p className="text-[11px] text-slate-500 mt-0.5">
+                    قم بتعيين الأستاذ المؤطر لكل فئة عمرية وجنس. سيتم تطبيق هذه المعلومات تلقائياً على جميع التلاميذ المسجلين في هذه الفئة بمطبوع المشاركة الرسمي.
+                  </p>
+                </div>
+
+                {/* Checkbox Toggle to show only participating categories */}
+                {activeSportStudents.length > 0 && (
+                  <label className="flex items-center gap-2 text-xs font-bold text-blue-800 bg-blue-50 hover:bg-blue-100 px-3 py-1.5 rounded-xl border border-blue-200 cursor-pointer shrink-0 select-none transition-colors">
+                    <input
+                      type="checkbox"
+                      checked={showOnlyParticipatingCoaches}
+                      onChange={(e) => setShowOnlyParticipatingCoaches(e.target.checked)}
+                      className="rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer h-4 w-4"
+                    />
+                    <span>إظهار الفئات المشارك فيها فقط ({
+                      Array.from(new Set(activeSportStudents.map(s => `${s.category}_${s.gender}`))).length
+                    })</span>
+                  </label>
+                )}
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {(() => {
+                  const allItems = activeSportCategories.flatMap(catId => [
+                    { catId, gender: 'Male' as const, label: getCategoryLabel(catId, 'Male') },
+                    { catId, gender: 'Female' as const, label: getCategoryLabel(catId, 'Female') }
+                  ]);
+                  
+                  const filteredItems = showOnlyParticipatingCoaches && activeSportStudents.length > 0
+                    ? allItems.filter(item => 
+                        activeSportStudents.some(s => s.category === item.catId && s.gender === item.gender)
+                      )
+                    : allItems;
+
+                  return filteredItems.length > 0 ? filteredItems : allItems;
+                })().map(({ catId, gender: g, label }) => {
+                  const key = `${catId}_${g}`;
+                  const currentCoach = effectiveCoaches[key] || {
+                    coachName: userProfile?.fullName || '',
+                    coachLeaseNumber: userProfile?.leaseNumber || '',
+                    coachPhone: userProfile?.phone || ''
+                  };
+                  const isEditing = editingCoachKey === key;
+
+                  return (
+                    <div key={key} className="p-4 rounded-xl border border-slate-150 bg-slate-50/40 hover:bg-slate-50 transition-colors space-y-3">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-black text-slate-800 flex items-center gap-1.5 font-bold">
+                          <span className="w-2 h-2 rounded-full bg-blue-500" />
+                          {label}
+                        </span>
+                        {!isEditing && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setEditingCoachKey(key);
+                              setTempCoachName(currentCoach.coachName);
+                              setTempCoachLease(currentCoach.coachLeaseNumber);
+                              setTempCoachPhone(currentCoach.coachPhone);
+                            }}
+                            className="text-[10px] text-blue-600 hover:text-blue-800 font-extrabold flex items-center gap-1 px-2 py-1 rounded bg-blue-50 border border-blue-100 cursor-pointer"
+                          >
+                            <span>تعديل المؤطر</span>
+                          </button>
+                        )}
+                      </div>
+
+                      {isEditing ? (
+                        <div className="space-y-2 pt-1">
+                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                            <div>
+                              <label className="block text-[9px] font-bold text-slate-500 mb-1">الاسم الكامل *</label>
+                              <input
+                                type="text"
+                                className="w-full text-[11px] px-2.5 py-1.5 bg-white border border-slate-200 rounded focus:ring-1 focus:ring-blue-500"
+                                value={tempCoachName}
+                                onChange={(e) => setTempCoachName(e.target.value)}
+                                placeholder="الاسم والنسب"
+                                required
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-[9px] font-bold text-slate-500 mb-1">رقم التأجير SOM *</label>
+                              <input
+                                type="text"
+                                className="w-full text-[11px] px-2.5 py-1.5 bg-white border border-slate-200 rounded focus:ring-1 focus:ring-blue-500 font-mono"
+                                value={tempCoachLease}
+                                onChange={(e) => setTempCoachLease(e.target.value)}
+                                placeholder="رقم التأجير"
+                                required
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-[9px] font-bold text-slate-500 mb-1">الهاتف *</label>
+                              <input
+                                type="tel"
+                                className="w-full text-[11px] px-2.5 py-1.5 bg-white border border-slate-200 rounded focus:ring-1 focus:ring-blue-500 font-mono"
+                                value={tempCoachPhone}
+                                onChange={(e) => setTempCoachPhone(e.target.value)}
+                                placeholder="الهاتف"
+                                required
+                              />
+                            </div>
+                          </div>
+                          <div className="flex items-center justify-end gap-2 pt-1">
+                            <button
+                              type="button"
+                              onClick={() => setEditingCoachKey(null)}
+                              className="text-[10px] text-slate-500 hover:text-slate-700 font-bold px-2.5 py-1"
+                            >
+                              إلغاء
+                            </button>
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                if (!tempCoachName.trim() || !tempCoachLease.trim() || !tempCoachPhone.trim()) {
+                                  toast.error('يرجى ملء جميع حقول المؤطر');
+                                  return;
+                                }
+                                // Update local predefined coaches state
+                                setPredefinedCoaches(prev => ({
+                                  ...prev,
+                                  [key]: {
+                                    coachName: tempCoachName.trim(),
+                                    coachLeaseNumber: tempCoachLease.trim(),
+                                    coachPhone: tempCoachPhone.trim()
+                                  }
+                                }));
+
+                                // Propagate updates to all existing students in this category/gender combo
+                                const studentsToUpdate = activeSportStudents.filter(s => s.category === catId && s.gender === g);
+                                if (studentsToUpdate.length > 0) {
+                                  try {
+                                    const updates = {
+                                      coachName: tempCoachName.trim(),
+                                      coachLeaseNumber: tempCoachLease.trim(),
+                                      coachPhone: tempCoachPhone.trim()
+                                    };
+                                    await Promise.all(studentsToUpdate.map(s => 
+                                      DataService.updateStudent(s.id, updates)
+                                    ));
+                                    setStudents(prev => prev.map(s => {
+                                      if (s.sportId === selectedSportId && s.category === catId && s.gender === g) {
+                                        return { ...s, ...updates };
+                                      }
+                                      return s;
+                                    }));
+                                    toast.success('تم تحديث بيانات مؤطر الفئة لجميع التلاميذ المسجلين!');
+                                  } catch (err) {
+                                    console.error(err);
+                                    toast.error('حدث خطأ أثناء تحديث بيانات التلاميذ');
+                                  }
+                                } else {
+                                  toast.success('تم حفظ بيانات المؤطر للفئة. سيتم تطبيقها تلقائياً على أي تلميذ جديد تسجله!');
+                                }
+                                setEditingCoachKey(null);
+                              }}
+                              className="text-[10px] bg-blue-600 hover:bg-blue-700 text-white font-bold px-3 py-1 rounded cursor-pointer"
+                            >
+                              حفظ المؤطر
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="grid grid-cols-3 gap-2 text-[10px] font-bold text-slate-600 pt-1">
+                          <div className="bg-white p-2 rounded border border-slate-100">
+                            <span className="block text-slate-400 text-[9px] mb-0.5">الاسم الكامل:</span>
+                            <span className="text-slate-800 line-clamp-1">{currentCoach.coachName || '---'}</span>
+                          </div>
+                          <div className="bg-white p-2 rounded border border-slate-100">
+                            <span className="block text-slate-400 text-[9px] mb-0.5">SOM:</span>
+                            <span className="text-slate-800 font-mono">{currentCoach.coachLeaseNumber || '---'}</span>
+                          </div>
+                          <div className="bg-white p-2 rounded border border-slate-100">
+                            <span className="block text-slate-400 text-[9px] mb-0.5">الهاتف:</span>
+                            <span className="text-slate-800 font-mono">{currentCoach.coachPhone || '---'}</span>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
           {/* Student Roster Table/Grid */}
           <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs overflow-hidden">
-            <div className="p-4 border-b border-slate-100 bg-slate-50/50 flex items-center justify-between">
-              <h4 className="text-xs md:text-sm font-bold text-slate-800">
-                لائحة التلاميذ المسجلين بالفريق للفئة الرياضية الحالية ({activeSportStudents.length} تلاميذ)
+            <div className="p-3.5 sm:p-4 border-b border-slate-100 bg-slate-50/50 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <h4 className="text-xs md:text-sm font-bold text-slate-800 flex items-center gap-2">
+                <Users className="h-4 w-4 text-blue-600 shrink-0" />
+                <span>لائحة التلاميذ المسجلين بالفريق ({activeSportStudents.length} تلاميذ)</span>
               </h4>
+              <div className="flex items-center gap-2 text-[11px] text-slate-500 font-medium">
+                <span>ذكور: <strong className="text-blue-700">{activeSportStudents.filter(s => s.gender === 'Male').length}</strong></span>
+                <span>•</span>
+                <span>إناث: <strong className="text-rose-600">{activeSportStudents.filter(s => s.gender === 'Female').length}</strong></span>
+              </div>
             </div>
 
             {activeSportStudents.length > 0 ? (
-              <div className="overflow-x-auto">
-                <table className="w-full text-right border-collapse">
-                  <thead>
-                    <tr className="border-b border-slate-100 text-[10px] font-extrabold text-slate-400 bg-slate-50/20 uppercase tracking-wider">
-                      <th className="p-4">الصورة</th>
-                      <th className="p-4">الاسم والنسب</th>
-                      <th className="p-4">الجنس</th>
-                      <th className="p-4">تاريخ الازدياد</th>
-                      <th className="p-4">الفئة</th>
-                      {selectedSportId === 'cross_country' && (
-                        <>
-                          <th className="p-4">نوع المشاركة</th>
-                          <th className="p-4">المسافة</th>
-                        </>
-                      )}
-                      {selectedSportId === 'athletics' && (
-                        <th className="p-4">التخصص</th>
-                      )}
-                      <th className="p-4">المؤسسة</th>
-                      <th className="p-4 text-left">الإجراءات</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100 text-xs font-medium text-slate-700">
-                    {activeSportStudents.map((stud) => (
-                      <tr key={stud.id} className="hover:bg-slate-50/50 transition-colors">
-                        <td className="p-4 whitespace-nowrap">
-                          <div className="w-10 h-10 rounded-full border border-slate-200 bg-slate-50 flex items-center justify-center overflow-hidden shrink-0 shadow-3xs">
-                            {stud.photoUrl ? (
-                              <img src={stud.photoUrl} alt={stud.fullName} className="w-full h-full object-cover" referrerpolicy="no-referrer" />
-                            ) : (
-                              <span className="text-sm font-bold text-slate-400">
-                                {stud.gender === 'Male' ? '👦' : '👧'}
+              <>
+                {/* 1. Mobile Cards View (Visible on Small Screens) */}
+                <div className="block md:hidden p-3 space-y-3 bg-slate-50/50">
+                  <div className="text-[11px] text-slate-500 font-medium pb-1 flex items-center justify-between">
+                    <span>بطاقات التلاميذ المسجلين:</span>
+                    <span className="font-bold text-slate-700">{activeSportStudents.length} مشارك</span>
+                  </div>
+                  {activeSportStudents.map((stud, idx) => (
+                    <div
+                      key={stud.id}
+                      className="p-3.5 bg-white rounded-xl border border-slate-200 shadow-2xs space-y-2.5"
+                    >
+                      <div className="flex items-start gap-3">
+                        <div className="w-12 h-12 rounded-xl border border-slate-200 bg-slate-50 flex items-center justify-center overflow-hidden shrink-0 shadow-3xs">
+                          {stud.photoUrl ? (
+                            <img src={stud.photoUrl} alt={stud.fullName} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                          ) : (
+                            <span className="text-xl">
+                              {stud.gender === 'Female' ? '👧' : '👦'}
+                            </span>
+                          )}
+                        </div>
+
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-start justify-between gap-1">
+                            <h5 className="text-xs font-bold text-slate-900 truncate">
+                              {idx + 1}. {stud.fullName}
+                            </h5>
+                            <span className={`inline-flex px-1.5 py-0.5 rounded text-[10px] font-bold border shrink-0 ${
+                              stud.gender === 'Male'
+                                ? 'bg-blue-50 text-blue-700 border-blue-200'
+                                : 'bg-pink-50 text-pink-700 border-pink-200'
+                            }`}>
+                              {stud.gender === 'Male' ? 'ذكر' : 'أنثى'}
+                            </span>
+                          </div>
+
+                          <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[10px]">
+                            {stud.massarNumber && (
+                              <span className="bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200 text-blue-900 font-mono font-bold">
+                                {stud.massarNumber}
+                              </span>
+                            )}
+                            <span className="bg-slate-100 text-slate-800 font-bold px-1.5 py-0.5 rounded border border-slate-200">
+                              {getCategoryLabel(stud.category)}
+                            </span>
+                            {stud.birthDate && (
+                              <span className="text-slate-500 font-mono font-medium">
+                                📅 {stud.birthDate}
                               </span>
                             )}
                           </div>
-                        </td>
-                        <td className="p-4 whitespace-nowrap font-bold text-slate-800">
-                          {stud.fullName}
-                        </td>
-                        <td className="p-4 whitespace-nowrap">
-                          <span className={`inline-flex px-2 py-0.5 rounded text-[10px] font-bold border ${
-                            stud.gender === 'Male'
-                              ? 'bg-blue-50 text-blue-700 border-blue-200'
-                              : 'bg-pink-50 text-pink-700 border-pink-200'
-                          }`}>
-                            {stud.gender === 'Male' ? 'ذكر' : 'أنثى'}
-                          </span>
-                        </td>
-                        <td className="p-4 whitespace-nowrap font-mono font-bold text-slate-600">
-                          {stud.birthDate}
-                        </td>
-                        <td className="p-4 whitespace-nowrap">
-                          <span className="bg-slate-100 text-slate-800 font-extrabold text-[10px] px-2 py-0.5 rounded border border-slate-200">
-                            {getCategoryLabel(stud.category)}
-                          </span>
-                        </td>
-                        {selectedSportId === 'cross_country' && (
-                          <>
-                            <td className="p-4 whitespace-nowrap">
-                              <span className={`inline-flex px-2.5 py-0.5 rounded text-[10px] font-bold border ${
+                        </div>
+                      </div>
+
+                      {/* Extra Details row if available */}
+                      <div className="pt-2 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2 text-[10px] text-slate-600">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          {selectedSportId === 'cross_country' && (
+                            <>
+                              <span className={`px-2 py-0.5 rounded font-bold border ${
                                 stud.participationType === 'school_team'
                                   ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
                                   : 'bg-amber-50 text-amber-700 border-amber-200'
                               }`}>
                                 {stud.participationType === 'school_team' ? 'فريق المؤسسة' : 'فردي'}
                               </span>
-                            </td>
-                            <td className="p-4 whitespace-nowrap font-bold text-blue-600">
-                              {stud.distance || getCrossCountryDistance(stud.category, stud.gender)}
-                            </td>
+                              <span className="font-bold text-blue-700">
+                                المسافة: {stud.distance || getCrossCountryDistance(stud.category, stud.gender)}
+                              </span>
+                            </>
+                          )}
+                          {selectedSportId === 'athletics' && stud.athleticsSpecialty && (
+                            <span className="font-bold text-blue-700 bg-blue-50 px-2 py-0.5 rounded border border-blue-200">
+                              {stud.athleticsSpecialty}
+                            </span>
+                          )}
+                          {stud.coachName && (
+                            <span className="text-slate-500">
+                              المؤطر: <strong className="text-slate-700">{stud.coachName}</strong>
+                            </span>
+                          )}
+                        </div>
+
+                        {/* Actions */}
+                        <div className="flex items-center gap-1 shrink-0 mr-auto">
+                          <button
+                            onClick={() => handleEditStudent(stud)}
+                            title="تعديل بيانات التلميذ"
+                            className="p-1.5 text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors cursor-pointer inline-flex items-center"
+                          >
+                            <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                            </svg>
+                          </button>
+                          <button
+                            onClick={() => handleDeleteStudent(stud.id)}
+                            title="حذف التلميذ"
+                            className="p-1.5 text-red-600 bg-red-50 hover:bg-red-100 rounded-lg transition-colors cursor-pointer inline-flex items-center"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* 2. Desktop Table View (Visible on Medium and Large Screens) */}
+                <div className="hidden md:block overflow-x-auto">
+                  <table className="w-full text-right border-collapse min-w-[880px]">
+                    <thead>
+                      <tr className="border-b border-slate-100 text-[10px] font-extrabold text-slate-400 bg-slate-50/20 uppercase tracking-wider">
+                        <th className="p-4">الصورة</th>
+                        <th className="p-4">الاسم والنسب</th>
+                        <th className="p-4">رقم مسار</th>
+                        <th className="p-4">الجنس</th>
+                        <th className="p-4">تاريخ الازدياد</th>
+                        <th className="p-4">الفئة</th>
+                        {selectedSportId === 'cross_country' && (
+                          <>
+                            <th className="p-4">نوع المشاركة</th>
+                            <th className="p-4">المسافة</th>
                           </>
                         )}
                         {selectedSportId === 'athletics' && (
-                          <td className="p-4 whitespace-nowrap font-bold text-blue-600">
-                            {stud.athleticsSpecialty || 'غير محدد'}
-                          </td>
+                          <th className="p-4">التخصص</th>
                         )}
-                        <td className="p-4 whitespace-nowrap text-slate-500 font-bold">
-                          {stud.schoolName}
-                        </td>
-                        <td className="p-4 whitespace-nowrap text-left">
-                          <div className="flex items-center justify-end gap-1.5">
-                            <button
-                              onClick={() => handleEditStudent(stud)}
-                              title="تعديل بيانات التلميذ"
-                              className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors cursor-pointer inline-flex items-center"
-                            >
-                              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                              </svg>
-                            </button>
-                            <button
-                              onClick={() => handleDeleteStudent(stud.id)}
-                              title="حذف التلميذ"
-                              className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors cursor-pointer inline-flex items-center"
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </button>
-                          </div>
-                        </td>
+                        <th className="p-4">المؤسسة</th>
+                        <th className="p-4">الأستاذ المؤطر</th>
+                        <th className="p-4 text-left">الإجراءات</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 text-xs font-medium text-slate-700">
+                      {activeSportStudents.map((stud) => (
+                        <tr key={stud.id} className="hover:bg-slate-50/50 transition-colors">
+                          <td className="p-4 whitespace-nowrap">
+                            <div className="w-10 h-10 rounded-full border border-slate-200 bg-slate-50 flex items-center justify-center overflow-hidden shrink-0 shadow-3xs">
+                              {stud.photoUrl ? (
+                                <img src={stud.photoUrl} alt={stud.fullName} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                              ) : (
+                                <span className="text-sm font-bold text-slate-400">
+                                  {stud.gender === 'Male' ? '👦' : '👧'}
+                                </span>
+                              )}
+                            </div>
+                          </td>
+                          <td className="p-4 whitespace-nowrap font-bold text-slate-800">
+                            {stud.fullName}
+                          </td>
+                          <td className="p-4 whitespace-nowrap font-mono text-xs font-bold text-slate-600">
+                            {stud.massarNumber ? (
+                              <span className="bg-slate-100 px-2 py-0.5 rounded border border-slate-200 text-blue-900 font-mono">
+                                {stud.massarNumber}
+                              </span>
+                            ) : (
+                              <span className="text-slate-300">-</span>
+                            )}
+                          </td>
+                          <td className="p-4 whitespace-nowrap">
+                            <span className={`inline-flex px-2 py-0.5 rounded text-[10px] font-bold border ${
+                              stud.gender === 'Male'
+                                ? 'bg-blue-50 text-blue-700 border-blue-200'
+                                : 'bg-pink-50 text-pink-700 border-pink-200'
+                            }`}>
+                              {stud.gender === 'Male' ? 'ذكر' : 'أنثى'}
+                            </span>
+                          </td>
+                          <td className="p-4 whitespace-nowrap font-mono font-bold text-slate-600">
+                            {stud.birthDate}
+                          </td>
+                          <td className="p-4 whitespace-nowrap">
+                            <span className="bg-slate-100 text-slate-800 font-extrabold text-[10px] px-2 py-0.5 rounded border border-slate-200">
+                              {getCategoryLabel(stud.category)}
+                            </span>
+                          </td>
+                          {selectedSportId === 'cross_country' && (
+                            <>
+                              <td className="p-4 whitespace-nowrap">
+                                <span className={`inline-flex px-2.5 py-0.5 rounded text-[10px] font-bold border ${
+                                  stud.participationType === 'school_team'
+                                    ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                    : 'bg-amber-50 text-amber-700 border-amber-200'
+                                }`}>
+                                  {stud.participationType === 'school_team' ? 'فريق المؤسسة' : 'فردي'}
+                                </span>
+                              </td>
+                              <td className="p-4 whitespace-nowrap font-bold text-blue-600">
+                                {stud.distance || getCrossCountryDistance(stud.category, stud.gender)}
+                              </td>
+                            </>
+                          )}
+                          {selectedSportId === 'athletics' && (
+                            <td className="p-4 whitespace-nowrap font-bold text-blue-600">
+                              {stud.athleticsSpecialty || 'غير محدد'}
+                            </td>
+                          )}
+                          <td className="p-4 whitespace-nowrap text-slate-500 font-bold">
+                            {stud.schoolName}
+                          </td>
+                          <td className="p-4 whitespace-nowrap">
+                            {stud.coachName ? (
+                              <div className="space-y-0.5">
+                                <p className="font-extrabold text-slate-800">{stud.coachName}</p>
+                                <p className="text-[10px] text-slate-400 font-mono">SOM: {stud.coachLeaseNumber || '—'}</p>
+                              </div>
+                            ) : (
+                              <span className="text-slate-400 text-[10px] italic">تلقائي (المنسق)</span>
+                            )}
+                          </td>
+                          <td className="p-4 whitespace-nowrap text-left">
+                            <div className="flex items-center justify-end gap-1.5">
+                              <button
+                                onClick={() => handleEditStudent(stud)}
+                                title="تعديل بيانات التلميذ"
+                                className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors cursor-pointer inline-flex items-center"
+                              >
+                                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                                </svg>
+                              </button>
+                              <button
+                                onClick={() => handleDeleteStudent(stud.id)}
+                                title="حذف التلميذ"
+                                className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors cursor-pointer inline-flex items-center"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </>
             ) : (
               <div className="p-12 text-center text-slate-500 space-y-3">
                 <div className="w-12 h-12 rounded-full bg-slate-50 border border-slate-100 flex items-center justify-center mx-auto text-xl">
@@ -1157,6 +1884,19 @@ export const TeacherTeams: React.FC = () => {
             </div>
           </div>
         </div>
+      )}
+      {/* PDF Export Modal */}
+      {isPdfModalOpen && selectedSportId && (
+        <ParticipationFormPdfModal
+          isOpen={isPdfModalOpen}
+          onClose={() => setIsPdfModalOpen(false)}
+          students={activeSportStudents}
+          sportId={selectedSportId}
+          sportName={getSportName(selectedSportId)}
+          schoolName={schoolName}
+          season={currentSeason}
+          directorate={activeDirectorateObj || undefined}
+        />
       )}
     </div>
   );

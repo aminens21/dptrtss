@@ -16,7 +16,8 @@ import {
   Building,
   Users,
   Copy,
-  Check
+  Check,
+  Pencil
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
@@ -25,13 +26,15 @@ interface TeacherDetailModalProps {
   onClose: () => void;
   teacher: User | null;
   teacherStudents?: Student[];
+  onEditRole?: (teacher: User) => void;
 }
 
 export const TeacherDetailModal: React.FC<TeacherDetailModalProps> = ({
   isOpen,
   onClose,
   teacher,
-  teacherStudents = []
+  teacherStudents = [],
+  onEditRole
 }) => {
   const [copiedField, setCopiedField] = React.useState<string | null>(null);
 
@@ -44,6 +47,18 @@ export const TeacherDetailModal: React.FC<TeacherDetailModalProps> = ({
     setTimeout(() => setCopiedField(null), 2000);
   };
 
+  const getCadreLabel = (cadre?: string) => {
+    switch (cadre) {
+      case 'PRIMARY':
+        return { text: 'أستاذ التعليم الابتدائي', bg: 'bg-emerald-500/20 text-emerald-200 border-emerald-400/30' };
+      case 'MIDDLE':
+        return { text: 'أستاذ الثانوي الإعدادي', bg: 'bg-indigo-500/20 text-indigo-200 border-indigo-400/30' };
+      case 'HIGH':
+      default:
+        return { text: 'أستاذ الثانوي التأهيلي', bg: 'bg-purple-500/20 text-purple-200 border-purple-400/30' };
+    }
+  };
+
   const isProfileComplete = !!(teacher.workLocation && teacher.leaseNumber);
 
   const specialties = Array.isArray(teacher.refereeSpecialty)
@@ -53,6 +68,7 @@ export const TeacherDetailModal: React.FC<TeacherDetailModalProps> = ({
     : [];
 
   const techCommitteeSports = teacher.techCommitteeSports || [];
+  const techCommitteeMemberSports = teacher.techCommitteeSportsMemberOf || [];
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-900/70 backdrop-blur-xs overflow-y-auto" dir="rtl">
@@ -71,11 +87,17 @@ export const TeacherDetailModal: React.FC<TeacherDetailModalProps> = ({
 
             <div>
               <div className="flex flex-wrap items-center gap-2">
+                <span className={`text-[10px] font-extrabold px-2.5 py-0.5 rounded-full border ${getCadreLabel(teacher.teachingCadre).bg}`}>
+                  {getCadreLabel(teacher.teachingCadre).text}
+                </span>
+
                 <span className="text-[10px] font-extrabold px-2.5 py-0.5 rounded-full bg-blue-500/30 text-blue-200 border border-blue-400/30">
                   {teacher.role === 'CENTRAL_ADMIN'
                     ? 'المسير المركزي'
                     : teacher.isTechCommitteeHead
                     ? 'رئيس لجنة تقنية إقليمية'
+                    : teacher.isTechCommitteeMember
+                    ? 'عضو لجنة تقنية إقليمية'
                     : 'أستاذ مؤطر تربية بدنية'}
                 </span>
 
@@ -237,6 +259,27 @@ export const TeacherDetailModal: React.FC<TeacherDetailModalProps> = ({
                   </div>
                 </div>
               )}
+
+              {/* Technical Committee Member Responsibilities */}
+              {teacher.isTechCommitteeMember && techCommitteeMemberSports.length > 0 && (
+                <div className="pt-2 border-t border-slate-100">
+                  <span className="text-[11px] font-bold text-indigo-700 block mb-1.5 flex items-center gap-1">
+                    <Award className="h-3.5 w-3.5 text-indigo-600" />
+                    <span>عضو لجنة تقنية إقليمية مكلف بالرياضات التالية:</span>
+                  </span>
+                  <div className="flex flex-wrap gap-1.5">
+                    {techCommitteeMemberSports.map(spec => {
+                      const sport = SPORTS_MAP[spec];
+                      return (
+                        <span key={spec} className="inline-flex items-center gap-1.5 px-3 py-1 bg-indigo-50 text-indigo-800 border border-indigo-200 rounded-xl text-xs font-bold">
+                          <span>{sport?.icon || '🏆'}</span>
+                          <span>{sport?.name || spec}</span>
+                        </span>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
 
@@ -269,10 +312,22 @@ export const TeacherDetailModal: React.FC<TeacherDetailModalProps> = ({
         </div>
 
         {/* Modal Footer */}
-        <div className="p-4 bg-slate-50 border-t border-slate-100 flex items-center justify-end">
+        <div className="p-4 bg-slate-50 border-t border-slate-100 flex items-center justify-between gap-3">
+          {onEditRole && (
+            <button
+              type="button"
+              onClick={() => onEditRole(teacher)}
+              className="flex items-center gap-1.5 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition-all shadow-xs cursor-pointer"
+            >
+              <Pencil className="h-3.5 w-3.5" />
+              <span>تعديل صفة الأستاذ والإطار</span>
+            </button>
+          )}
+
           <button
+            type="button"
             onClick={onClose}
-            className="px-5 py-2 bg-slate-800 hover:bg-slate-900 text-white rounded-xl text-xs font-bold cursor-pointer transition-colors"
+            className="px-5 py-2 bg-slate-800 hover:bg-slate-900 text-white rounded-xl text-xs font-bold cursor-pointer transition-colors mr-auto"
           >
             إغلاق البطاقة
           </button>

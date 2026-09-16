@@ -1,11 +1,49 @@
 import React, { useEffect, useState, useMemo } from 'react';
+import { useSearchParams, useNavigate } from 'react-router-dom';
+import clsx from 'clsx';
 import { useAuth } from '../contexts/AuthContext';
-import { DataService, SPORTS_MAP, deduplicateById } from '../lib/dataService';
-import { Match, School, Venue, Tournament } from '../types';
-import { Plus, Search, CalendarDays, MapPin, Clock, Filter, CheckCircle2, Trophy, UserCheck, KeyRound, Trash2, ShieldCheck, Lock, Pencil, Phone } from 'lucide-react';
+import { DataService, SPORTS_MAP, deduplicateById, AGE_CATEGORIES, isClubTournament } from '../lib/dataService';
+import { Match, School, Venue, Tournament, Sport, Student } from '../types';
+import {
+  Plus,
+  Search,
+  CalendarDays,
+  MapPin,
+  Clock,
+  Filter,
+  CheckCircle2,
+  Trophy,
+  UserCheck,
+  KeyRound,
+  Trash2,
+  ShieldCheck,
+  Lock,
+  Pencil,
+  Phone,
+  Calendar as CalendarIcon,
+  ListOrdered,
+  FileDown,
+  BookOpen,
+  ArrowRight,
+  ChevronLeft,
+  Users,
+  Activity,
+  Award,
+  Medal,
+  Layers,
+  Sparkles,
+  ChevronRight,
+  Settings,
+  Star
+} from 'lucide-react';
 import { CreateMatchModal } from '../components/CreateMatchModal';
 import { ScoreModal } from '../components/ScoreModal';
 import { ConfirmDeleteModal } from '../components/ConfirmDeleteModal';
+import { ChampionshipCalendarView } from '../components/ChampionshipCalendarView';
+import { SportResultsModal } from '../components/SportResultsModal';
+import { EditTournamentModal } from '../components/EditTournamentModal';
+import { EditTournamentScheduleModal } from '../components/EditTournamentScheduleModal';
+import { CrossCountryCategoryResult } from '../types';
 import { cn } from '../lib/utils';
 import toast from 'react-hot-toast';
 
@@ -15,32 +53,56 @@ export const Matches: React.FC = () => {
   const [schools, setSchools] = useState<School[]>([]);
   const [venues, setVenues] = useState<Venue[]>([]);
   const [tournaments, setTournaments] = useState<Tournament[]>([]);
+  const [students, setStudents] = useState<Student[]>([]);
+  const [sportsConfig, setSportsConfig] = useState<Sport[]>([]);
+  const [crossCountryResults, setCrossCountryResults] = useState<Record<string, CrossCountryCategoryResult>>({});
   const [activeSeason, setActiveSeason] = useState('2026/2027');
   const [loading, setLoading] = useState(true);
-  const [search, setSearch] = useState('');
-  const [dateFilter, setDateFilter] = useState('');
+
+  // Filters for Level 1 Sports overview
+  const [searchQuery, setSearchQuery] = useState('');
+  const [selectedSportFilter, setSelectedSportFilter] = useState<string>('ALL');
   const [statusFilter, setStatusFilter] = useState<string>('ALL');
-  const [selectedSport, setSelectedSport] = useState<string>('ALL');
 
-  // Modals
-  const [isCreateOpen, setIsCreateOpen] = useState(false);
-  const [selectedMatchForScore, setSelectedMatchForScore] = useState<Match | null>(null);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const navigate = useNavigate();
+
+  // Tab selection ('list' for sports/results hierarchy, 'calendar' for annual schedule)
+  const tabParam = searchParams.get('tab');
+  const [activeTab, setActiveTab] = useState<'list' | 'calendar'>(() => {
+    return tabParam === 'calendar' ? 'calendar' : 'list';
+  });
+
+  // Selected sport for detailed results modal (Level 2 & 3)
+  const [selectedSportForResults, setSelectedSportForResults] = useState<Sport | null>(null);
+  const [isResultsModalOpen, setIsResultsModalOpen] = useState(false);
+
+  // Modals for Match / Tournament operations
+  const [isCreateMatchOpen, setIsCreateMatchOpen] = useState(false);
+  const [createMatchInitialSportId, setCreateMatchInitialSportId] = useState<string | undefined>(undefined);
   const [editingMatch, setEditingMatch] = useState<Match | null>(null);
+  const [selectedMatchForScore, setSelectedMatchForScore] = useState<Match | null>(null);
 
-  // Delete modal state
+  // Edit / Delete tournament modals
+  const [editingTournament, setEditingTournament] = useState<Tournament | null>(null);
+  const [isEditTournamentOpen, setIsEditTournamentOpen] = useState(false);
+  const [selectedSportForSchedule, setSelectedSportForSchedule] = useState<Sport | null>(null);
+  const [isScheduleModalOpen, setIsScheduleModalOpen] = useState(false);
+
+  // Deletion targets
   const [matchToDelete, setMatchToDelete] = useState<Match | null>(null);
+  const [tournamentToDelete, setTournamentToDelete] = useState<Tournament | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
 
+  // Role flags
   const isTeacher = userProfile?.role === 'TEACHER' && !userProfile?.isTechCommitteeHead;
   const isCentralAdmin = userProfile?.role === 'CENTRAL_ADMIN';
   const isSportManager = userProfile?.role === 'SPORT_MANAGER';
   const isTechCommitteeHead = userProfile?.isTechCommitteeHead === true;
 
-  // Strict permission checks: Central Admin, Sport Managers, and Technical Committee Heads can manage matches
   const canCreate = isCentralAdmin || isSportManager || isTechCommitteeHead;
-  const canEditScore = isCentralAdmin || isSportManager || isTechCommitteeHead;
 
-  // Determine manager or tech head sport specialty restriction
+  // Manager specialty sport ID
   const managerSportId = useMemo(() => {
     if (userProfile?.role !== 'SPORT_MANAGER') return undefined;
     if (userProfile.sportId) return userProfile.sportId;
@@ -51,642 +113,655 @@ export const Matches: React.FC = () => {
     return assignedTourn?.sportId || 'basketball';
   }, [userProfile, tournaments]);
 
-  const restrictedSportId = useMemo(() => {
-    if (isCentralAdmin) return undefined;
-    if (isSportManager) return managerSportId;
-    if (isTechCommitteeHead) {
-      if (userProfile?.techCommitteeSports && userProfile.techCommitteeSports.length > 0) {
-        return userProfile.techCommitteeSports[0];
-      }
-      return userProfile?.sportId;
-    }
-    return undefined;
-  }, [isCentralAdmin, isSportManager, isTechCommitteeHead, managerSportId, userProfile]);
-
-  // Determine user's primary/preferred sport specialty for automatic focus on login
-  const preferredSportId = useMemo(() => {
-    if (!userProfile) return 'ALL';
-    
-    // 1. Sport Manager
-    if (userProfile.role === 'SPORT_MANAGER') {
-      return managerSportId || 'ALL';
-    }
-    
-    // 2. Technical Committee Head
-    if (userProfile.isTechCommitteeHead && userProfile.techCommitteeSports && userProfile.techCommitteeSports.length > 0) {
-      return userProfile.techCommitteeSports[0];
-    }
-    
-    // 3. Technical Committee Member
-    if (userProfile.isTechCommitteeMember && userProfile.techCommitteeSportsMemberOf && userProfile.techCommitteeSportsMemberOf.length > 0) {
-      return userProfile.techCommitteeSportsMemberOf[0];
-    }
-    
-    // 4. Fallback userProfile.sportId (such as teachers with preferred sport)
-    if (userProfile.sportId) {
-      return userProfile.sportId;
-    }
-    
-    return 'ALL';
-  }, [userProfile, tournaments, managerSportId]);
-
-  // Set initial selected sport to user preferred specialty upon login/data load
-  useEffect(() => {
-    if (preferredSportId && preferredSportId !== 'ALL') {
-      setSelectedSport(preferredSportId);
-    }
-  }, [preferredSportId]);
-
-  useEffect(() => {
-    loadData();
-  }, []);
-
+  // Load initial data
   const loadData = async () => {
     setLoading(true);
     try {
-      const [mList, sList, vList, tList, season] = await Promise.all([
+      const [m, s, v, t, curSeason, ccRes, stu, config] = await Promise.all([
         DataService.getMatches(),
         DataService.getSchools(),
         DataService.getVenues(),
         DataService.getTournaments(),
-        DataService.getActiveSeason()
+        DataService.getActiveSeason(),
+        DataService.getCrossCountryResults(),
+        DataService.getStudents(),
+        DataService.getSportsConfig()
       ]);
-      setMatches(deduplicateById<Match>(mList));
-      setSchools(deduplicateById<School>(sList));
-      setVenues(deduplicateById<Venue>(vList));
-      setTournaments(deduplicateById<Tournament>(tList));
-      if (season) {
-        setActiveSeason(season);
-      }
-    } catch (e) {
-      console.error(e);
-      toast.error('خطأ في تحميل المعطيات');
+      setMatches(m);
+      setSchools(s);
+      setVenues(v);
+      setTournaments(deduplicateById(t));
+      if (curSeason) setActiveSeason(curSeason);
+      if (ccRes) setCrossCountryResults(ccRes);
+      if (stu) setStudents(stu);
+      if (config) setSportsConfig(config);
+    } catch (error) {
+      console.error('Error loading matches data:', error);
+      toast.error('حدث خطأ أثناء تحميل بيانات المباريات والنتائج');
     } finally {
       setLoading(false);
     }
   };
 
-  const handleCreateMatch = async (matchData: Omit<Match, 'id'>, matchId?: string) => {
-    if (isTeacher) {
-      toast.error('غير مصرح للأستاذ بإضافة أو تعديل المقابلات الرياضية');
-      return;
+  useEffect(() => {
+    loadData();
+    const handleDirChange = () => {
+      loadData();
+    };
+    window.addEventListener('directorateChanged', handleDirChange);
+    return () => {
+      window.removeEventListener('directorateChanged', handleDirChange);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (tabParam === 'calendar') {
+      setActiveTab('calendar');
+    } else {
+      setActiveTab('list');
     }
+  }, [tabParam]);
+
+  const handleTabChange = (tab: 'list' | 'calendar') => {
+    setActiveTab(tab);
+    setSearchParams(prev => {
+      const p = new URLSearchParams(prev);
+      p.set('tab', tab);
+      return p;
+    });
+  };
+
+  // Open Sport Results Modal (Level 2 & 3)
+  const handleOpenSportResults = (sport: Sport) => {
+    setSelectedSportForResults(sport);
+    setIsResultsModalOpen(true);
+  };
+
+  // Save/Update match
+  const handleSaveMatch = async (matchData: Omit<Match, 'id'>, matchId?: string) => {
     try {
       if (matchId) {
-        // Find existing match
-        const existing = matches.find(m => m.id === matchId);
-        if (existing) {
-          await DataService.updateMatch(matchId, matchData);
-          
-          setMatches(prev => deduplicateById<Match>(prev.map(m => m.id === matchId ? { ...m, ...matchData } : m)));
-          toast.success('تم تعديل المقابلة بنجاح!');
-        }
+        await DataService.updateMatch(matchId, matchData);
+        toast.success('تم تحيين بيانات المقابلة بنجاح');
       } else {
-        const created = await DataService.addMatch(matchData);
-        setMatches(prev => deduplicateById<Match>([created, ...prev]));
-        toast.success('تمت برمجة المقابلة بنجاح!');
+        await DataService.addMatch(matchData);
+        toast.success('تمت برمجة المقابلة بنجاح');
       }
-    } catch (e) {
-      toast.error('حدث خطأ أثناء حفظ المقابلة');
+      setIsCreateMatchOpen(false);
+      setEditingMatch(null);
+      await loadData();
+    } catch (error: any) {
+      console.error('Error saving match:', error);
+      toast.error(error.message || 'فشل في حفظ بيانات المقابلة');
     }
   };
 
-  const handleSaveScore = async (matchId: string, score1: number, score2: number, status: Match['status']) => {
-    if (isTeacher) {
-      toast.error('غير مصرح للأستاذ بتسجيل أو تعديل نتائج المقابلات');
-      return;
+  // Save match score
+  const handleSaveScore = async (
+    matchId: string,
+    score1: number,
+    score2: number,
+    status: Match['status'],
+    options?: {
+      scorers?: string;
+      penalty1?: number;
+      penalty2?: number;
+      isWalkover?: boolean;
+      walkoverWinner?: 'team1' | 'team2';
+      winnerTeamId?: string;
+      school1Qualified?: boolean;
+      school2Qualified?: boolean;
     }
+  ) => {
     try {
-      await DataService.updateMatchScore(matchId, score1, score2, status);
-      setMatches(prev => prev.map(m => m.id === matchId ? { ...m, score1, score2, status } : m));
-      toast.success('تم تثبيت نتيجة المقابلة بنجاح!');
-    } catch (e) {
-      toast.error('حدث خطأ أثناء حفظ النتيجة');
+      await DataService.updateMatchScore(matchId, score1, score2, status, options);
+      toast.success('تم تسجيل وتحيين نتيجة المقابلة بنجاح');
+      setSelectedMatchForScore(null);
+      await loadData();
+    } catch (error: any) {
+      console.error('Error updating match score:', error);
+      toast.error(error.message || 'فشل في تحيين النتيجة');
     }
   };
 
-  const promptDeleteMatch = (m: Match) => {
-    if (isTeacher) {
-      toast.error('غير مصرح للأستاذ بحذف المقابلات الرياضية');
-      return;
-    }
-    if (userProfile?.role === 'SPORT_MANAGER' && managerSportId && m.sportId !== managerSportId) {
-      toast.error('لا يمكنك حذف مباريات رياضة أخرى خارج تخصصك');
-      return;
-    }
-    setMatchToDelete(m);
-  };
-
+  // Confirm delete match
   const handleConfirmDeleteMatch = async () => {
-    if (isTeacher) {
-      toast.error('غير مصرح للأستاذ بحذف المقابلات');
-      return;
-    }
     if (!matchToDelete) return;
     setIsDeleting(true);
     try {
       await DataService.deleteMatch(matchToDelete.id);
-      setMatches(prev => prev.filter(m => m.id !== matchToDelete.id));
-      toast.success('تم حذف المقابلة بنجاح');
+      toast.success('تم حذف المقابلة والنتيجة بنجاح!');
       setMatchToDelete(null);
-    } catch (e) {
-      toast.error('تعذر حذف المقابلة');
+      await loadData();
+    } catch (error: any) {
+      console.error('Error deleting match:', error);
+      toast.error(error.message || 'فشل في حذف المقابلة');
     } finally {
       setIsDeleting(false);
     }
   };
 
-  const getSchoolName = (schoolId?: string) => {
-    return schools.find(s => s.id === schoolId)?.name || 'مؤسسة تعليمية';
-  };
-
-  const getVenueName = (venueId?: string) => {
-    return venues.find(v => v.id === venueId)?.name || 'القاعة الرياضية بتاوريرت';
-  };
-
-  const getTournament = (tournamentId?: string) => {
-    return tournaments.find(t => t.id === tournamentId);
-  };
-
-  const filtered = matches.filter(m => {
-    const s1 = getSchoolName(m.team1Id);
-    const s2 = getSchoolName(m.team2Id);
-    const tourn = getTournament(m.tournamentId);
-    const matchesSearch = search === '' ||
-                          (m.stage || '').includes(search) ||
-                          s1.includes(search) ||
-                          s2.includes(search) ||
-                          (tourn?.name || '').includes(search) ||
-                          (tourn?.managerName || '').includes(search);
-    const matchesStatus = statusFilter === 'ALL' || m.status === statusFilter;
-    const matchesSport = selectedSport === 'ALL' || m.sportId === selectedSport || (!m.sportId && selectedSport === 'football');
-    
-    let matchDateStr = '';
-    if (m.date) {
-      if (typeof m.date === 'string') matchDateStr = m.date.split('T')[0];
-      else if (m.date.toDate) matchDateStr = m.date.toDate().toISOString().split('T')[0];
-      else if (m.date instanceof Date) matchDateStr = m.date.toISOString().split('T')[0];
+  // Confirm delete tournament
+  const handleConfirmDeleteTournament = async () => {
+    if (!tournamentToDelete) return;
+    setIsDeleting(true);
+    try {
+      await DataService.deleteTournament(tournamentToDelete.id);
+      toast.success('تم حذف البطولة الإقليمية بنجاح!');
+      setTournamentToDelete(null);
+      await loadData();
+    } catch (error: any) {
+      console.error('Error deleting tournament:', error);
+      toast.error(error.message || 'فشل في حذف البطولة');
+    } finally {
+      setIsDeleting(false);
     }
-    const matchesDate = dateFilter === '' || matchDateStr === dateFilter;
+  };
 
-    return matchesSearch && matchesStatus && matchesSport && matchesDate;
-  });
+  // Save cross country category result
+  const handleSaveCrossCountryResult = async (result: CrossCountryCategoryResult) => {
+    try {
+      await DataService.saveCrossCountryCategoryResult(result);
+      setCrossCountryResults(prev => ({
+        ...prev,
+        [result.categoryId]: result
+      }));
+      toast.success('تم حفظ وتثبيت نتائج البوديوم بنجاح 🏆');
+    } catch (error) {
+      console.error('Error saving cross country result:', error);
+      toast.error('حدث خطأ أثناء حفظ النتائج');
+    }
+  };
 
-  const scheduledCount = matches.filter(m => m.status === 'Scheduled').length;
-  const ongoingCount = matches.filter(m => m.status === 'Ongoing').length;
-  const completedCount = matches.filter(m => m.status === 'Completed').length;
+  // Group sports with match metrics & tournaments
+  const sportsData = useMemo(() => {
+    return sportsConfig.map(sport => {
+      const sportTournaments = tournaments.filter(t => t.sportId === sport.id);
+      const sportMatches = matches.filter(m => {
+        if (m.sportId === sport.id) return true;
+        if (m.tournamentId) return sportTournaments.some(t => t.id === m.tournamentId);
+        return false;
+      });
 
-  const currentSportInfo = managerSportId ? SPORTS_MAP[managerSportId] : null;
+      const scheduledCount = sportMatches.filter(m => m.status === 'Scheduled').length;
+      const ongoingCount = sportMatches.filter(m => m.status === 'Ongoing').length;
+      const completedCount = sportMatches.filter(m => m.status === 'Completed').length;
+      const totalMatches = sportMatches.length;
+
+      const nonClubCount = sportMatches.filter(m => {
+        if (m.tournamentId) {
+          const pt = tournaments.find(t => t.id === m.tournamentId);
+          if (pt) return !isClubTournament(pt);
+        }
+        return true;
+      }).length;
+
+      const clubCount = totalMatches - nonClubCount;
+
+      return {
+        sport,
+        sportTournaments,
+        sportMatches,
+        scheduledCount,
+        ongoingCount,
+        completedCount,
+        totalMatches,
+        nonClubCount,
+        clubCount
+      };
+    });
+  }, [sportsConfig, tournaments, matches]);
+
+  // Filtered sports list for Level 1
+  const filteredSports = useMemo(() => {
+    return sportsData.filter(item => {
+      const { sport, totalMatches, ongoingCount, completedCount, scheduledCount } = item;
+
+      // Filter by Sport
+      if (selectedSportFilter !== 'ALL' && sport.id !== selectedSportFilter) return false;
+
+      // Filter by Status
+      if (statusFilter === 'Ongoing' && ongoingCount === 0) return false;
+      if (statusFilter === 'Scheduled' && scheduledCount === 0) return false;
+      if (statusFilter === 'Completed' && completedCount === 0) return false;
+
+      // Filter by Search Query
+      if (searchQuery.trim()) {
+        const q = searchQuery.toLowerCase();
+        const matchName = sport.name.toLowerCase().includes(q);
+        const matchDesc = (sport.description || '').toLowerCase().includes(q);
+        return matchName || matchDesc;
+      }
+
+      return true;
+    });
+  }, [sportsData, selectedSportFilter, statusFilter, searchQuery]);
+
+  // Overall Match Stats
+  const overallScheduledCount = matches.filter(m => m.status === 'Scheduled').length;
+  const overallOngoingCount = matches.filter(m => m.status === 'Ongoing').length;
+  const overallCompletedCount = matches.filter(m => m.status === 'Completed').length;
 
   return (
-    <div className="space-y-4" dir="rtl">
+    <div className="space-y-6 dir-rtl">
       {/* Top Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white p-4 md:p-5 rounded-xl border border-slate-200 shadow-xs">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-5 rounded-3xl border border-slate-200 shadow-xs">
         <div>
           <div className="flex items-center gap-2">
-            <h2 className="text-base md:text-lg font-bold text-slate-800">
-              {userProfile?.role === 'TEACHER' ? 'جدول المقابلات والنتائج الإقليمية' : 'برنامج المباريات والنتائج المباشرة'}
+            <h2 className="text-base md:text-lg font-black text-slate-800">
+              نتائج ومباريات البطولات الإقليمية المدرسية
             </h2>
-            <span className="text-[10px] bg-blue-50 text-blue-700 font-bold px-2 py-0.5 rounded border border-blue-200">
+            <span className="text-[10px] bg-blue-50 text-blue-700 font-extrabold px-2.5 py-0.5 rounded-full border border-blue-200">
               الموسم {activeSeason}
             </span>
           </div>
-          <p className="text-xs text-slate-500 font-medium mt-0.5">
-            {userProfile?.role === 'TEACHER'
-              ? 'متابعة فورية لمواعيد المباريات، الملاعب، والنتائج الرسمية المسجلة لمختلف الرياضات'
-              : 'جدول المقابلات الإقليمية، تتبع المشرفين على كل بطولة، وإدخال النتائج الفورية'}
+          <p className="text-xs text-slate-500 font-medium mt-1">
+            استعراض النتائج والبرمجة حسب الرياضة، صنف البطولة (⚪ غير منتمين للأندية / 🟡 منتمين للأندية)، والفئات العمرية
           </p>
         </div>
 
-        {canCreate && (
-          <button
-            onClick={() => setIsCreateOpen(true)}
-            className="inline-flex items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-xs font-bold text-white shadow-xs hover:bg-blue-700 transition-colors cursor-pointer"
-          >
-            <Plus className="h-4 w-4" />
-            <span>برمجة مباراة جديدة</span>
-          </button>
-        )}
-      </div>
-
-      {/* Sport Manager Specialty Dedicated Banner */}
-      {managerSportId && currentSportInfo && (
-        <div className="bg-gradient-to-r from-blue-50 via-indigo-50/60 to-blue-50 border border-blue-200 rounded-xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-xs">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-blue-600 text-white flex items-center justify-center text-xl font-bold shadow-xs shrink-0">
-              {currentSportInfo.icon}
-            </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <span className="font-bold text-slate-800 text-sm">
-                  مسؤول نشاط: {currentSportInfo.name} {currentSportInfo.icon}
-                </span>
-                <span className="bg-blue-100 text-blue-800 text-[10px] font-bold px-2 py-0.5 rounded-full border border-blue-200">
-                  تخصص معتمد
-                </span>
-              </div>
-              <p className="text-xs text-slate-600 mt-0.5">
-                مرحباً بك {userProfile?.fullName}، يمكنك برمجة مقابلات <strong>{currentSportInfo.name}</strong> وتدبير نتائجها ومتابعة مراكز التباري الخاصة بها.
-              </p>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
+        <div className="flex items-center gap-2">
+          {/* Main Tab Toggle: Sports List vs Calendar */}
+          <div className="flex items-center bg-slate-100 p-1 rounded-2xl border border-slate-200">
             <button
-              onClick={() => setSelectedSport(managerSportId)}
+              onClick={() => handleTabChange('list')}
               className={cn(
-                "px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer",
-                selectedSport === managerSportId
-                  ? "bg-blue-600 text-white shadow-xs"
-                  : "bg-white text-slate-700 border border-slate-200 hover:bg-slate-50"
-              )}
-            >
-              مباريات تخصصي ({currentSportInfo.name})
-            </button>
-            <button
-              onClick={() => setSelectedSport('ALL')}
-              className={cn(
-                "px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer",
-                selectedSport === 'ALL'
-                  ? "bg-slate-800 text-white shadow-xs"
-                  : "bg-white text-slate-700 border border-slate-200 hover:bg-slate-50"
-              )}
-            >
-              جميع الرياضات
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Quick Summary Stats for Matches & Results */}
-      <div className="grid grid-cols-3 gap-3">
-        <button
-          onClick={() => setStatusFilter('Scheduled')}
-          className={cn(
-            "p-3 rounded-xl border text-right transition-all cursor-pointer",
-            statusFilter === 'Scheduled'
-              ? "bg-blue-50/80 border-blue-300 ring-2 ring-blue-500/20"
-              : "bg-white border-slate-200 hover:border-blue-200"
-          )}
-        >
-          <div className="flex items-center justify-between">
-            <span className="text-[10px] font-bold text-blue-700 uppercase">المقابلات المبرمجة</span>
-            <CalendarDays className="h-3.5 w-3.5 text-blue-600" />
-          </div>
-          <p className="text-lg md:text-xl font-black text-slate-800 mt-1">{scheduledCount}</p>
-        </button>
-
-        <button
-          onClick={() => setStatusFilter('Ongoing')}
-          className={cn(
-            "p-3 rounded-xl border text-right transition-all cursor-pointer",
-            statusFilter === 'Ongoing'
-              ? "bg-emerald-50/80 border-emerald-300 ring-2 ring-emerald-500/20"
-              : "bg-white border-slate-200 hover:border-emerald-200"
-          )}
-        >
-          <div className="flex items-center justify-between">
-            <span className="text-[10px] font-bold text-emerald-700 uppercase">مباشر / جارية</span>
-            <Clock className="h-3.5 w-3.5 text-emerald-600 animate-pulse" />
-          </div>
-          <p className="text-lg md:text-xl font-black text-emerald-700 mt-1">{ongoingCount}</p>
-        </button>
-
-        <button
-          onClick={() => setStatusFilter('Completed')}
-          className={cn(
-            "p-3 rounded-xl border text-right transition-all cursor-pointer",
-            statusFilter === 'Completed'
-              ? "bg-amber-50/80 border-amber-300 ring-2 ring-amber-500/20"
-              : "bg-white border-slate-200 hover:border-amber-200"
-          )}
-        >
-          <div className="flex items-center justify-between">
-            <span className="text-[10px] font-bold text-amber-700 uppercase">النتائج المسجلة</span>
-            <Trophy className="h-3.5 w-3.5 text-amber-600" />
-          </div>
-          <p className="text-lg md:text-xl font-black text-slate-800 mt-1">{completedCount}</p>
-        </button>
-      </div>
-
-      {/* High Density Filter & Search */}
-      <div className="flex flex-col sm:flex-row items-center gap-3 bg-white p-3 rounded-xl border border-slate-200 shadow-xs">
-        <div className="flex flex-1 items-center px-2 w-full">
-          <Search className="h-4 w-4 text-slate-400 ml-2" />
-          <input
-            type="text"
-            placeholder="ابحث باسم المؤسسة، المرحلة، البطولة، أو المسؤول..."
-            className="w-full border-0 focus:ring-0 text-xs py-1 text-slate-800 placeholder-slate-400 focus:outline-none"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
-        </div>
-
-        {/* Date Filter */}
-        <div className="flex items-center gap-2 border-t sm:border-t-0 sm:border-r border-slate-100 pt-2 sm:pt-0 sm:pr-3 shrink-0">
-          <CalendarDays className="h-4 w-4 text-blue-600" />
-          <input
-            type="date"
-            value={dateFilter}
-            onChange={(e) => setDateFilter(e.target.value)}
-            className="text-xs font-bold text-slate-700 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer"
-          />
-        </div>
-
-        {/* Sport Filter Dropdown */}
-        <div className="flex items-center gap-2 w-full sm:w-auto border-t sm:border-t-0 sm:border-r border-slate-100 pt-2 sm:pt-0 sm:pr-3 shrink-0">
-          <label htmlFor="matches-sport-filter" className="text-xs font-bold text-slate-600 whitespace-nowrap flex items-center gap-1.5">
-            <Filter className="h-3.5 w-3.5 text-blue-600" />
-            <span>الرياضة:</span>
-          </label>
-          <select
-            id="matches-sport-filter"
-            value={selectedSport}
-            onChange={(e) => setSelectedSport(e.target.value)}
-            className="text-xs font-bold text-slate-700 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer min-w-[160px]"
-          >
-            <option value="ALL">🏆 جميع الرياضات</option>
-            {Object.entries(SPORTS_MAP).map(([id, info]) => (
-              <option key={id} value={id}>
-                {info.icon} {info.name}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        <div className="flex items-center gap-1.5 w-full sm:w-auto overflow-x-auto pb-1 sm:pb-0">
-          {[
-            { id: 'ALL', label: 'جميع الحالات' },
-            { id: 'Scheduled', label: `مبرمجة (${scheduledCount})` },
-            { id: 'Ongoing', label: `جارية (${ongoingCount})` },
-            { id: 'Completed', label: `النتائج (${completedCount})` },
-          ].map((st) => (
-            <button
-              key={st.id}
-              onClick={() => setStatusFilter(st.id)}
-              className={cn(
-                "px-3 py-1.5 text-xs font-bold rounded-lg whitespace-nowrap transition-colors cursor-pointer",
-                statusFilter === st.id
+                "px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5",
+                activeTab === 'list'
                   ? "bg-slate-900 text-white shadow-xs"
-                  : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                  : "text-slate-600 hover:text-slate-900"
               )}
             >
-              {st.label}
+              <Trophy className="w-3.5 h-3.5" />
+              <span>نتائج الرياضات</span>
             </button>
-          ))}
+            <button
+              onClick={() => handleTabChange('calendar')}
+              className={cn(
+                "px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5",
+                activeTab === 'calendar'
+                  ? "bg-slate-900 text-white shadow-xs"
+                  : "text-slate-600 hover:text-slate-900"
+              )}
+            >
+              <CalendarIcon className="w-3.5 h-3.5" />
+              <span>الرزنامة الإقليمية</span>
+            </button>
+          </div>
+
+          {canCreate && (
+            <button
+              onClick={() => {
+                setEditingMatch(null);
+                setCreateMatchInitialSportId(undefined);
+                setIsCreateMatchOpen(true);
+              }}
+              className="inline-flex items-center justify-center gap-2 rounded-2xl bg-blue-600 px-4 py-2 text-xs font-black text-white shadow-xs hover:bg-blue-700 transition-colors cursor-pointer"
+            >
+              <Plus className="h-4 w-4" />
+              <span>برمجة مباراة جديد</span>
+            </button>
+          )}
         </div>
       </div>
 
-      {loading ? (
-        <div className="flex justify-center p-12">
-          <div className="h-7 w-7 animate-spin rounded-full border-3 border-blue-600 border-t-transparent"></div>
-        </div>
+      {/* Primary Content View */}
+      {activeTab === 'calendar' ? (
+        <ChampionshipCalendarView
+          matches={matches}
+          tournaments={tournaments}
+          schools={schools}
+          venues={venues}
+          activeSeason={activeSeason}
+          user={userProfile}
+          onOpenMatchDetail={(match) => {
+            if (canCreate) {
+              setEditingMatch(match);
+              setIsCreateMatchOpen(true);
+            }
+          }}
+          onOpenCreateMatch={() => {
+            if (canCreate) {
+              setEditingMatch(null);
+              setIsCreateMatchOpen(true);
+            }
+          }}
+        />
       ) : (
-        <div className="space-y-3">
-          {filtered.length > 0 ? (
-            filtered.map((m) => {
-              const tourn = getTournament(m.tournamentId);
-              const mSportInfo = SPORTS_MAP[m.sportId || 'football'] || { name: 'رياضة', icon: '🏆' };
+        <div className="space-y-6">
+          {/* KPI Stat Cards */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-extrabold text-slate-500 uppercase">الرياضات المبرمجة</span>
+                <Trophy className="h-4.5 w-4.5 text-amber-500" />
+              </div>
+              <p className="text-2xl font-black text-slate-900 mt-1">{sportsConfig.length}</p>
+              <span className="text-[10px] text-slate-400 font-medium">رياضة مدرسية إقليمية</span>
+            </div>
 
-              return (
-                <div
-                  key={m.id}
-                  className="flex flex-col rounded-xl bg-white p-4 border border-slate-200 shadow-xs transition-all hover:border-blue-300 hover:shadow-sm"
-                >
-                  <div className="flex flex-col md:flex-row items-center justify-between gap-4">
-                    {/* Match Time / Status / Sport Icon */}
-                    <div className="flex items-center gap-3 w-full md:w-auto">
-                      <div className="w-24 text-center border-l border-slate-100 pl-3 shrink-0">
-                        <div className="text-[10px] text-slate-500 font-bold mb-1 border-b border-slate-100 pb-1">
-                          {m.date ? (typeof m.date === 'string' ? new Date(m.date) : (m.date as any).toDate ? (m.date as any).toDate() : new Date(m.date)).toLocaleDateString('ar-MA') : 'غير محدد'}
+            <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-extrabold text-blue-700 uppercase">إجمالي المقابلات</span>
+                <CalendarDays className="h-4.5 w-4.5 text-blue-600" />
+              </div>
+              <p className="text-2xl font-black text-blue-700 mt-1">{matches.length}</p>
+              <span className="text-[10px] text-blue-600/80 font-medium">
+                {overallScheduledCount} مباراة مبرمجة
+              </span>
+            </div>
+
+            <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-extrabold text-red-600 uppercase">جارية الآن (مباشر)</span>
+                <Clock className="h-4.5 w-4.5 text-red-600 animate-pulse" />
+              </div>
+              <p className="text-2xl font-black text-red-600 mt-1">{overallOngoingCount}</p>
+              <span className="text-[10px] text-red-600/80 font-medium">مباراة تجرى حالياً</span>
+            </div>
+
+            <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-extrabold text-emerald-700 uppercase">النتائج المسجلة</span>
+                <Award className="h-4.5 w-4.5 text-emerald-600" />
+              </div>
+              <p className="text-2xl font-black text-emerald-700 mt-1">{overallCompletedCount}</p>
+              <span className="text-[10px] text-emerald-600/80 font-medium">مباراة منتهية بنتائج رسمية</span>
+            </div>
+          </div>
+
+          {/* Level 1 Search & Filter Bar */}
+          <div className="bg-white p-3.5 rounded-2xl border border-slate-200 shadow-xs flex flex-col md:flex-row items-center justify-between gap-3">
+            <div className="relative flex-1 w-full">
+              <Search className="w-4 h-4 text-slate-400 absolute right-3 top-2.5" />
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="ابحث باسم الرياضة الإقليمية أو تفاصيلها..."
+                className="w-full pr-9 pl-3 py-2 text-xs font-medium bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+
+            <div className="flex items-center gap-2 w-full md:w-auto shrink-0">
+              {/* Sport Selector */}
+              <select
+                value={selectedSportFilter}
+                onChange={(e) => setSelectedSportFilter(e.target.value)}
+                className="px-3 py-2 text-xs font-bold bg-slate-50 border border-slate-200 rounded-xl text-slate-700 focus:outline-none"
+              >
+                <option value="ALL">🏆 جميع الرياضات الإقليمية</option>
+                {sportsConfig.map(s => (
+                  <option key={s.id} value={s.id}>
+                    {s.icon || '🏆'} {s.name}
+                  </option>
+                ))}
+              </select>
+
+              {/* Status Selector */}
+              <select
+                value={statusFilter}
+                onChange={(e) => setStatusFilter(e.target.value)}
+                className="px-3 py-2 text-xs font-bold bg-slate-50 border border-slate-200 rounded-xl text-slate-700 focus:outline-none"
+              >
+                <option value="ALL">جميع الحالات</option>
+                <option value="Ongoing">🔴 جارية الآن</option>
+                <option value="Scheduled">📅 مبرمجة</option>
+                <option value="Completed">🏆 مكتملة النتائج</option>
+              </select>
+            </div>
+          </div>
+
+          {/* LEVEL 1: SPORTS CARDS GRID (بطولات الرياضات الإقليمية) */}
+          {loading ? (
+            <div className="flex justify-center p-12">
+              <div className="h-8 w-8 animate-spin rounded-full border-4 border-blue-600 border-t-transparent"></div>
+            </div>
+          ) : filteredSports.length === 0 ? (
+            <div className="p-12 text-center bg-white rounded-3xl border border-slate-200 space-y-3">
+              <Trophy className="w-12 h-12 text-slate-300 mx-auto" />
+              <p className="text-base font-bold text-slate-700">لم يتم العثور على أي نتائج مطابقة</p>
+              <p className="text-xs text-slate-500">جرب تغيير معايير البحث أو اختيار رياضة أخرى.</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+              {filteredSports.map(item => {
+                const { sport, totalMatches, scheduledCount, ongoingCount, completedCount, sportTournaments } = item;
+                const isManagerSpecialty = managerSportId === sport.id;
+
+                return (
+                  <div
+                    key={sport.id}
+                    onClick={() => handleOpenSportResults(sport)}
+                    className={`rounded-3xl border transition-all duration-300 flex flex-col justify-between overflow-hidden bg-white shadow-2xs hover:shadow-lg cursor-pointer group ${
+                      isManagerSpecialty
+                        ? 'border-blue-400 ring-2 ring-blue-500/10'
+                        : 'border-slate-200/80 hover:border-blue-400'
+                    }`}
+                  >
+                    <div className="p-5 space-y-4">
+                      {/* Header: Sport Icon & Status */}
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex items-center gap-3">
+                          <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-blue-50 to-indigo-50 border border-blue-100 flex items-center justify-center text-2xl shadow-3xs group-hover:scale-105 transition-transform">
+                            {sport.icon || '🏆'}
+                          </div>
+                          <div>
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-[11px] font-black text-blue-700 uppercase tracking-wider">
+                                {sport.name}
+                              </span>
+                              {isManagerSpecialty && (
+                                <span className="inline-flex items-center gap-0.5 text-[9px] bg-amber-50 text-amber-800 font-bold px-1.5 py-0.2 rounded border border-amber-200">
+                                  <Star className="h-2.5 w-2.5 fill-amber-500 text-amber-500" />
+                                  تخصصك
+                                </span>
+                              )}
+                            </div>
+                            <span className="text-[10px] text-slate-400 font-medium">الموسم {activeSeason}</span>
+                          </div>
                         </div>
-                        <div className="flex items-center justify-center gap-1 text-xs font-bold text-blue-600">
-                          <span>{mSportInfo.icon}</span>
-                          <span>{m.startTime || '10:00'}</span>
-                        </div>
-                        <span className={`inline-block mt-1 text-[9px] font-bold px-1.5 py-0.5 rounded ${
-                          m.status === 'Completed'
-                            ? 'bg-slate-100 text-slate-700'
-                            : m.status === 'Ongoing'
-                            ? 'bg-emerald-50 text-emerald-700 animate-pulse'
-                            : 'bg-blue-50 text-blue-700'
-                        }`}>
-                          {m.status === 'Completed' ? 'انتهت' : m.status === 'Ongoing' ? 'مباشر' : 'مبرمجة'}
-                        </span>
+
+                        {/* Ongoing status pulse or overall status */}
+                        {ongoingCount > 0 ? (
+                          <span className="flex items-center gap-1 text-[10px] font-black bg-red-50 text-red-700 border border-red-200 px-2.5 py-1 rounded-full animate-pulse shadow-xs">
+                            <span className="w-2 h-2 rounded-full bg-red-600 animate-ping" />
+                            مباشر ({ongoingCount})
+                          </span>
+                        ) : (
+                          <span className="text-[10px] font-bold bg-blue-50 text-blue-800 border border-blue-100 px-2.5 py-1 rounded-full">
+                            {totalMatches} مباراة
+                          </span>
+                        )}
                       </div>
 
-                    <div className="flex-1 w-full flex flex-col sm:flex-row items-center justify-center gap-2 sm:gap-4 md:gap-6 px-2">
-                      {/* Team 1 */}
-                      <div className="flex items-center gap-2 sm:gap-3 text-right w-full sm:flex-1 justify-between sm:justify-end bg-slate-50 sm:bg-transparent p-2 sm:p-0 rounded-lg border border-slate-100 sm:border-transparent">
-                        <span className="font-bold text-xs md:text-sm text-slate-800 line-clamp-2">
-                          {getSchoolName(m.team1Id)}
-                        </span>
-                        <div className="w-8 h-8 bg-blue-50 border border-blue-100 text-blue-700 rounded-lg flex items-center justify-center text-xs font-bold shrink-0">
-                          🏫
-                        </div>
-                      </div>
+                      {/* Sport Description */}
+                      <h3 className="text-sm font-black text-slate-800 leading-snug group-hover:text-blue-700 transition-colors">
+                        البطولة الإقليمية المدرسية لـ {sport.name}
+                      </h3>
 
-                      {/* Score / Status */}
-                      <div className="px-4 py-1.5 bg-slate-900 text-white rounded-lg font-black tracking-wider text-xs md:text-sm shadow-2xs shrink-0 mx-auto my-1 sm:my-0">
-                        {m.status === 'Completed' || m.status === 'Ongoing'
-                          ? `${m.score1 || 0} - ${m.score2 || 0}`
-                          : 'ضد'}
-                      </div>
-
-                      {/* Team 2 */}
-                      <div className="flex items-center gap-2 sm:gap-3 text-left w-full sm:flex-1 justify-between sm:justify-start flex-row-reverse sm:flex-row bg-slate-50 sm:bg-transparent p-2 sm:p-0 rounded-lg border border-slate-100 sm:border-transparent">
-                        <span className="font-bold text-xs md:text-sm text-slate-800 line-clamp-2 text-right sm:text-left">
-                          {getSchoolName(m.team2Id)}
-                        </span>
-                        <div className="w-8 h-8 bg-emerald-50 border border-emerald-100 text-emerald-700 rounded-lg flex items-center justify-center text-xs font-bold shrink-0">
-                          🏫
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Tournament, Referees & Metadata */}
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-[11px] text-slate-500 pt-3 border-t border-slate-100">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <div className="flex items-center gap-1.5 bg-slate-50 px-2 py-1 rounded border border-slate-100">
-                        <MapPin className="h-3.5 w-3.5 text-slate-400" />
-                        <span className="font-bold text-slate-700">{getVenueName(m.venueId)}</span>
-                      </div>
-                      
-                      <div className="flex items-center gap-1.5 bg-slate-50 px-2 py-1 rounded border border-slate-100">
-                        <span className="font-bold text-slate-700">{mSportInfo.icon} {mSportInfo.name}</span>
-                      </div>
-
-                      {tourn && (
-                        <div className="flex items-center gap-1.5 bg-slate-50 px-2 py-1 rounded border border-slate-100">
-                          <Trophy className="h-3.5 w-3.5 text-amber-500" />
-                          <span className="font-bold text-slate-700 truncate max-w-[120px]">{tourn.name}</span>
-                        </div>
-                      )}
-
-                      {((m.referees && m.referees.length > 0) || m.referee1Id || m.referee2Id) && (
-                        <div className="flex items-center gap-1.5 bg-blue-50/50 px-2 py-1 rounded border border-blue-100">
-                          <ShieldCheck className="h-3.5 w-3.5 text-blue-500" />
-                          <span className="font-bold text-blue-800">
-                            طاقم التحكيم:{' '}
-                            {m.referees && m.referees.length > 0
-                              ? m.referees.join(' / ')
-                              : [m.referee1Id, m.referee2Id].filter(Boolean).join(' / ')}
+                      {/* Branch indicator summary */}
+                      <div className="bg-slate-50 p-3 rounded-2xl border border-slate-100 space-y-1.5 text-xs font-bold text-slate-700">
+                        <div className="flex items-center justify-between">
+                          <span className="flex items-center gap-1 text-[11px] text-slate-600">
+                            <span>⚪ بطولة غير المنتمين للأندية:</span>
+                          </span>
+                          <span className="text-blue-700 bg-blue-50 px-2 py-0.5 rounded-md border border-blue-100 text-[10px] font-black">
+                            {item.nonClubCount} مباراة
                           </span>
                         </div>
-                      )}
+                        <div className="flex items-center justify-between">
+                          <span className="flex items-center gap-1 text-[11px] text-amber-900">
+                            <span>🟡 بطولة المنتمين للأندية:</span>
+                          </span>
+                          <span className="text-amber-900 bg-amber-100/70 px-2 py-0.5 rounded-md border border-amber-200 text-[10px] font-black">
+                            {item.clubCount} مباراة
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Matches breakdown bar */}
+                      <div className="grid grid-cols-3 gap-1.5 text-center text-[10px] font-bold pt-1">
+                        <div className="bg-blue-50 text-blue-800 p-1.5 rounded-xl border border-blue-100">
+                          <span>مبرمجة: </span>
+                          <strong className="font-black text-xs">{scheduledCount}</strong>
+                        </div>
+                        <div className="bg-red-50 text-red-700 p-1.5 rounded-xl border border-red-100">
+                          <span>جارية: </span>
+                          <strong className="font-black text-xs">{ongoingCount}</strong>
+                        </div>
+                        <div className="bg-emerald-50 text-emerald-800 p-1.5 rounded-xl border border-emerald-100">
+                          <span>منتهية: </span>
+                          <strong className="font-black text-xs">{completedCount}</strong>
+                        </div>
+                      </div>
                     </div>
 
-                    {/* Action buttons */}
-                    <div className="flex items-center gap-1.5 shrink-0">
-                      {(m.status === 'Scheduled' || m.status === 'Ongoing') && (m.referees?.length > 0 || m.referee1Id || m.referee2Id) && (
-                        <a
-                          href={`https://wa.me/?text=${encodeURIComponent(`تذكير: لديك تعيين لتحكيم مقابلة في إطار البطولة المدرسية.\nالمكان: ${getVenueName(m.venueId)}\nالتاريخ: ${new Date(m.date).toLocaleDateString('ar-MA')}\nالتوقيت: ${m.startTime}\nالفريقين: ${getSchoolName(m.team1Id)} ضد ${getSchoolName(m.team2Id)}`)}`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          title="إرسال تنبيه عبر واتساب للحكام"
-                          className="px-2 py-1.5 bg-emerald-50 hover:bg-emerald-500 hover:text-white text-emerald-600 font-bold rounded-lg text-xs transition-colors cursor-pointer flex items-center gap-1"
+                    {/* Card Footer Actions */}
+                    <div className="p-3 bg-slate-50 border-t border-slate-100 flex items-center justify-between gap-2">
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleOpenSportResults(sport);
+                        }}
+                        className="flex-1 py-2 px-3 bg-slate-900 hover:bg-slate-800 text-white font-black text-xs rounded-xl flex items-center justify-center gap-2 transition-all shadow-xs cursor-pointer group-hover:bg-blue-600"
+                      >
+                        <Layers className="h-4 w-4" />
+                        <span>دخول واستعراض نتائج الرياضة (المنتمين وغير المنتمين)</span>
+                      </button>
+
+                      {/* Central Admin Edit Schedule option */}
+                      {isCentralAdmin && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setSelectedSportForSchedule(sport);
+                            setIsScheduleModalOpen(true);
+                          }}
+                          className="p-2 bg-slate-200 hover:bg-slate-300 text-slate-800 rounded-xl text-xs font-bold transition-colors cursor-pointer"
+                          title="تعديل تواريخ وإعدادات الرياضة"
                         >
-                          <Phone className="h-3.5 w-3.5" />
-                          <span className="hidden sm:inline">تنبيه</span>
-                        </a>
-                      )}
-
-                      {canEditScore && (
-                        <>
-                          {m.status !== 'Completed' && (
-                            <button
-                              onClick={() => {
-                                if (userProfile?.role === 'SPORT_MANAGER' && managerSportId && m.sportId !== managerSportId) {
-                                  toast.error(`أنت مخول لتدبير نتائج ${mSportInfo?.name || ''} فقط`);
-                                  return;
-                                }
-                                setSelectedMatchForScore(m);
-                              }}
-                              title="إنهاء المقابلة وتأكيد النتيجة النهائية"
-                              className="px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-lg text-xs transition-colors cursor-pointer flex items-center gap-1 shadow-xs shrink-0"
-                            >
-                              <CheckCircle2 className="h-3.5 w-3.5" />
-                              <span>انتهت المباراة</span>
-                            </button>
-                          )}
-                          <button
-                            onClick={() => {
-                              if (userProfile?.role === 'SPORT_MANAGER' && managerSportId && m.sportId !== managerSportId) {
-                                toast.error(`أنت مخول لتدبير نتائج ${mSportInfo?.name || ''} فقط`);
-                                return;
-                              }
-                              setSelectedMatchForScore(m);
-                            }}
-                            className="px-3 py-1.5 bg-slate-100 hover:bg-blue-600 hover:text-white text-slate-700 font-bold rounded-lg text-xs transition-colors cursor-pointer shrink-0"
-                          >
-                            {m.status === 'Completed' ? 'تعديل النتيجة' : 'تسجيل النتيجة'}
-                          </button>
-                        </>
-                      )}
-
-                      {canCreate && (
-                        <>
-                          <button
-                            onClick={() => {
-                              if (userProfile?.role === 'SPORT_MANAGER' && managerSportId && m.sportId !== managerSportId) {
-                                toast.error('لا يمكنك تعديل مباريات رياضة أخرى خارج تخصصك');
-                                return;
-                              }
-                              setEditingMatch(m);
-                              setIsCreateOpen(true);
-                            }}
-                            title="تعديل برمجة المقابلة"
-                            className="p-1.5 text-slate-400 hover:text-blue-600 rounded-lg hover:bg-blue-50 transition-colors cursor-pointer"
-                          >
-                            <Pencil className="h-4 w-4" />
-                          </button>
-                          
-                          <button
-                            onClick={() => promptDeleteMatch(m)}
-                            title="حذف المقابلة"
-                            className="p-1.5 text-slate-400 hover:text-red-600 rounded-lg hover:bg-red-50 transition-colors cursor-pointer"
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </button>
-                        </>
+                          <Settings className="w-4 h-4" />
+                        </button>
                       )}
                     </div>
                   </div>
-                </div>
-
-                  {/* Extended Results (Scorers, Penalties) */}
-                  {(m.status === 'Completed' || m.status === 'Ongoing') && (m.penalty1 !== undefined || m.scorers) && (
-                    <div className="w-full mt-3 pt-3 border-t border-slate-100 flex flex-col md:flex-row items-center justify-center gap-4">
-                      {m.penalty1 !== undefined && m.penalty2 !== undefined && (
-                        <div className="text-[11px] bg-slate-50 px-3 py-1 rounded-full border border-slate-200 text-slate-600 flex items-center gap-2">
-                          <span className="font-bold text-slate-800">ركلات الترجيح:</span>
-                          <span className="font-black text-slate-900">{m.penalty1} - {m.penalty2}</span>
-                        </div>
-                      )}
-                      {m.scorers && (
-                        <div className="text-[11px] text-slate-500 text-center flex items-center gap-1.5 bg-slate-50 px-3 py-1 rounded-full border border-slate-200">
-                          ⚽ <span>{m.scorers}</span>
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-              );
-            })
-          ) : (
-            <div className="flex flex-col items-center justify-center p-12 text-slate-500 bg-white rounded-xl border border-slate-200 text-center">
-              <CalendarDays className="h-10 w-10 text-slate-300 mb-3" />
-              <p className="text-sm font-bold text-slate-700 mb-1">لا توجد مباريات مطابقة للبحث</p>
-              {canCreate && (
-                <button
-                  onClick={() => setIsCreateOpen(true)}
-                  className="mt-3 px-4 py-2 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors cursor-pointer"
-                >
-                  برمجة مباراة جديدة الآن
-                </button>
-              )}
+                );
+              })}
             </div>
           )}
         </div>
       )}
 
-      {/* Create Match Modal */}
-      <CreateMatchModal
-        isOpen={isCreateOpen}
-        onClose={() => {
-          setIsCreateOpen(false);
-          setTimeout(() => setEditingMatch(null), 200);
-        }}
-        schools={schools}
-        venues={venues}
+      {/* LEVEL 2 & 3: SPORT RESULTS MODAL (WITH ⚪ NON-CLUB VS 🟡 CLUB BRANCHES) */}
+      <SportResultsModal
+        isOpen={isResultsModalOpen}
+        onClose={() => setIsResultsModalOpen(false)}
+        sport={selectedSportForResults}
         tournaments={tournaments}
         matches={matches}
-        managerSportId={restrictedSportId}
-        onSave={handleCreateMatch}
-        editingMatch={editingMatch}
+        schools={schools}
+        venues={venues}
+        students={students}
+        crossCountryResults={crossCountryResults}
+        onUpdateCrossCountryResult={handleSaveCrossCountryResult}
+        userProfile={userProfile}
+        activeSeason={activeSeason}
+        onEditScore={(match) => {
+          setSelectedMatchForScore(match);
+        }}
+        onEditMatch={(match) => {
+          setEditingMatch(match);
+          setIsCreateMatchOpen(true);
+        }}
+        onDeleteMatch={(match) => {
+          setMatchToDelete(match);
+        }}
+        onCreateMatch={(sportId, initialAffiliation) => {
+          setCreateMatchInitialSportId(sportId);
+          setEditingMatch(null);
+          setIsCreateMatchOpen(true);
+        }}
+        onEditTournament={(tourn) => {
+          setEditingTournament(tourn);
+          setIsEditTournamentOpen(true);
+        }}
+        onDeleteTournament={(tourn) => {
+          setTournamentToDelete(tourn);
+        }}
       />
 
-      {/* Score Edit Modal */}
+      {/* CREATE / EDIT MATCH MODAL */}
+      <CreateMatchModal
+        isOpen={isCreateMatchOpen}
+        onClose={() => {
+          setIsCreateMatchOpen(false);
+          setEditingMatch(null);
+        }}
+        tournaments={tournaments}
+        schools={schools}
+        venues={venues}
+        onSave={handleSaveMatch}
+        editingMatch={editingMatch}
+        initialTournamentId={createMatchInitialSportId}
+      />
+
+      {/* SCORE MODAL */}
       <ScoreModal
+        match={selectedMatchForScore}
         isOpen={!!selectedMatchForScore}
         onClose={() => setSelectedMatchForScore(null)}
-        match={selectedMatchForScore}
-        schools={schools}
         onSave={handleSaveScore}
+        schools={schools}
+        venues={venues}
       />
 
-      {/* Confirm Delete Match Modal */}
+      {/* EDIT TOURNAMENT MODAL (CENTRAL ADMIN) */}
+      <EditTournamentModal
+        isOpen={isEditTournamentOpen}
+        onClose={() => {
+          setIsEditTournamentOpen(false);
+          setEditingTournament(null);
+        }}
+        tournament={editingTournament}
+        onUpdated={loadData}
+      />
+
+      {/* EDIT TOURNAMENT SCHEDULE MODAL */}
+      <EditTournamentScheduleModal
+        isOpen={isScheduleModalOpen}
+        onClose={() => {
+          setIsScheduleModalOpen(false);
+          setSelectedSportForSchedule(null);
+        }}
+        sport={selectedSportForSchedule}
+        tournaments={tournaments}
+        onUpdated={loadData}
+      />
+
+      {/* CONFIRM DELETE MATCH MODAL */}
       <ConfirmDeleteModal
         isOpen={!!matchToDelete}
         onClose={() => setMatchToDelete(null)}
         onConfirm={handleConfirmDeleteMatch}
-        title="حذف المقابلة المبرمجة"
-        message="هل أنت متأكد من رغبتك في حذف هذه المقابلة نهائياً من البرنامج الإقليمي؟"
-        itemName={matchToDelete ? `${getSchoolName(matchToDelete.team1Id)} ضد ${getSchoolName(matchToDelete.team2Id)}` : undefined}
+        title="حذف المباراة والنتيجة"
+        message="هل أنت متأكد من رغبتك في حذف هذه المباراة؟ سيتم إلغاء النتيجة والبرمجة نهائياً."
+        confirmText="حذف نهائي"
+        isDeleting={isDeleting}
+      />
+
+      {/* CONFIRM DELETE TOURNAMENT MODAL */}
+      <ConfirmDeleteModal
+        isOpen={!!tournamentToDelete}
+        onClose={() => setTournamentToDelete(null)}
+        onConfirm={handleConfirmDeleteTournament}
+        title="حذف البطولة الإقليمية"
+        message={`هل أنت متأكد من رغبتك في حذف بطولة "${tournamentToDelete?.name || ''}" نهائياً؟`}
+        confirmText="تأكيد الحذف"
         isDeleting={isDeleting}
       />
     </div>
   );
 };
-

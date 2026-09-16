@@ -1,13 +1,15 @@
-import { Tournament, Match, School, Venue, User, Referee, Student, Sport, AppNotification } from '../types';
-import { INITIAL_TOURNAMENTS, INITIAL_MATCHES, INITIAL_SCHOOLS, INITIAL_VENUES } from './initialData';
+import { Tournament, Match, School, Venue, User, Referee, Student, Sport, AppNotification, RoleSidebarPermissions, Directorate, DirectorateTransferRequest, SUPER_ADMIN_EMAILS, CrossCountryCategoryResult } from '../types';
+import { INITIAL_TOURNAMENTS, INITIAL_MATCHES, INITIAL_SCHOOLS, INITIAL_VENUES, INITIAL_DIRECTORATES } from './initialData';
+import { INITIAL_CROSS_COUNTRY_RESULTS } from './crossCountryConfig';
 import { db } from '../firebase/config';
-import { collection, getDocs, addDoc, doc, updateDoc, setDoc, deleteDoc, Timestamp, serverTimestamp } from 'firebase/firestore';
+import { collection, getDocs, addDoc, doc, getDoc, updateDoc, setDoc, deleteDoc, Timestamp, serverTimestamp, query, where, onSnapshot } from 'firebase/firestore';
 
 const STORAGE_KEYS = {
   TOURNAMENTS: 'taourirt_tournaments_data',
   MATCHES: 'taourirt_matches_data',
   SCHOOLS: 'taourirt_schools_data',
   VENUES: 'taourirt_venues_data',
+  DIRECTORATES: 'app_directorates_data'
 };
 
 // Helper to deduplicate any array of objects by id
@@ -105,6 +107,13 @@ try {
   // Ignore in SSR/test environment
 }
 
+export interface OfficialLogos {
+  ministryLogo?: string;
+  frmssLogo?: string;
+  ministryLogoHeight?: number;
+  frmssLogoHeight?: number;
+}
+
 export const getAgeCategoriesForSeason = (season: string) => {
   const match = season.match(/(\d{4})/);
   const startYear = match ? parseInt(match[1], 10) : 2026;
@@ -112,38 +121,85 @@ export const getAgeCategoriesForSeason = (season: string) => {
   return [
     { 
       id: 'U12', 
-      name: `البراعم (U12) - مواليد ${startYear - 11} وما بعد`, 
-      shortName: 'البراعم (U12)', 
+      name: `البراعم / البرعمات - مواليد ${startYear - 11} وما بعد`, 
+      shortName: `البراعم / البرعمات - مواليد ${startYear - 11} وما بعد`, 
       years: Array.from({ length: 15 }, (_, i) => startYear - 11 + i)
     },
     { 
       id: 'U15', 
-      name: `الصغار / الصغيرات (U15) - مواليد ${startYear - 14}/${startYear - 13}/${startYear - 12}`, 
-      shortName: 'الصغار (U15)', 
+      name: `الصغار / الصغيرات - مواليد ${startYear - 14}/${startYear - 13}/${startYear - 12}`, 
+      shortName: `الصغار / الصغيرات - مواليد ${startYear - 14}/${startYear - 13}/${startYear - 12}`, 
       years: [startYear - 14, startYear - 13, startYear - 12] 
     },
     { 
       id: 'U18', 
-      name: `الفتيان / الفتيات (U18) - مواليد ${startYear - 17}/${startYear - 16}/${startYear - 15}`, 
-      shortName: 'الفتيان (U18)', 
+      name: `الفتيان / الفتيات - مواليد ${startYear - 17}/${startYear - 16}/${startYear - 15}`, 
+      shortName: `الفتيان / الفتيات - مواليد ${startYear - 17}/${startYear - 16}/${startYear - 15}`, 
       years: [startYear - 17, startYear - 16, startYear - 15] 
     },
     { 
       id: 'U20', 
-      name: `فئة ${startYear - 17} وما بعد - مواليد ${startYear - 17}/${startYear - 16}/${startYear - 15}...`, 
-      shortName: `${startYear - 17} ومابعد`, 
+      name: `الشبان / الشابات - مواليد ${startYear - 17} وما بعد`, 
+      shortName: `الشبان / الشابات - مواليد ${startYear - 17} وما بعد`, 
       years: Array.from({ length: 15 }, (_, i) => startYear - 17 + i)
-    },
-    { 
-      id: 'OPEN', 
-      name: 'فئة مفتوحة (جميع الفئات)', 
-      shortName: 'فئة مفتوحة', 
-      years: [] 
     }
   ];
 };
 
+export function normalizeCategoryKey(catStr: string): string {
+  if (!catStr) return 'U15';
+  const c = catStr.trim().toUpperCase();
+  if (c.includes('U12') || c.includes('براعم') || c.includes('برعمات')) return 'U12';
+  if (c.includes('U15') || c.includes('صغار') || c.includes('صغيرات')) return 'U15';
+  if (c.includes('U18') || c.includes('فتيان') || c.includes('فتيات')) return 'U18';
+  if (c.includes('U20') || c.includes('شبان') || c.includes('شابات')) return 'U20';
+  if (c === 'U12' || c === 'U15' || c === 'U18' || c === 'U20') return c;
+  return catStr;
+}
+
+export function getCategoryGenderLabel(category: string, gender?: string, season: string = '2026/2027'): string {
+  const normKey = normalizeCategoryKey(category);
+  const match = season.match(/(\d{4})/);
+  const startYear = match ? parseInt(match[1], 10) : 2026;
+
+  const u12Years = ` - مواليد ${startYear - 11} وما بعد`;
+  const u15Years = ` - مواليد ${startYear - 14}/${startYear - 13}/${startYear - 12}`;
+  const u18Years = ` - مواليد ${startYear - 17}/${startYear - 16}/${startYear - 15}`;
+  const u20Years = ` - مواليد ${startYear - 17} وما بعد`;
+
+  if (normKey === 'U12') {
+    if (gender === 'Female' || gender === 'إناث') return `البرعمات${u12Years}`;
+    if (gender === 'Male' || gender === 'ذكور') return `البراعم${u12Years}`;
+    return `البراعم / البرعمات${u12Years}`;
+  }
+  if (normKey === 'U15') {
+    if (gender === 'Female' || gender === 'إناث') return `الصغيرات${u15Years}`;
+    if (gender === 'Male' || gender === 'ذكور') return `الصغار${u15Years}`;
+    return `الصغار / الصغيرات${u15Years}`;
+  }
+  if (normKey === 'U18') {
+    if (gender === 'Female' || gender === 'إناث') return `الفتيات${u18Years}`;
+    if (gender === 'Male' || gender === 'ذكور') return `الفتيان${u18Years}`;
+    return `الفتيان / الفتيات${u18Years}`;
+  }
+  if (normKey === 'U20') {
+    if (gender === 'Female' || gender === 'إناث') return `الشابات${u20Years}`;
+    if (gender === 'Male' || gender === 'ذكور') return `الشبان${u20Years}`;
+    return `الشبان / الشابات${u20Years}`;
+  }
+  return category;
+}
+
 export const AGE_CATEGORIES = getAgeCategoriesForSeason('2026/2027');
+
+export const isClubTournament = (t?: { affiliationType?: string; name?: string } | null): boolean => {
+  if (!t) return false;
+  if (t.affiliationType === 'non_club') return false;
+  if (t.name && (t.name.includes('غير المنتمين') || t.name.includes('لغير المنتمين'))) return false;
+  if (t.affiliationType === 'club_affiliated') return true;
+  if (t.name && (t.name.includes('للمنتمين للأندية') || t.name.includes('المنتمين للأندية') || t.name.includes('عصب وأندية'))) return true;
+  return false;
+};
 
 export const GENDER_MAP: Record<string, { name: string; icon: string; badgeClass: string }> = {
   Male: { name: 'ذكور', icon: '👦', badgeClass: 'bg-blue-50 text-blue-700 border-blue-200' },
@@ -152,6 +208,40 @@ export const GENDER_MAP: Record<string, { name: string; icon: string; badgeClass
 };
 
 export const DataService = {
+  // OFFICIAL LOGOS FOR PARTICIPATION LISTS
+  async getOfficialLogos(): Promise<OfficialLogos> {
+    try {
+      const snap = await getDoc(doc(db, 'config', 'logos'));
+      if (snap.exists()) {
+        const logos = snap.data() as OfficialLogos;
+        localStorage.setItem('taourirt_official_logos', JSON.stringify(logos));
+        return logos;
+      }
+    } catch (e) {
+      console.warn("Firestore load official logos error, falling back to cached:", e);
+    }
+    try {
+      const data = localStorage.getItem('taourirt_official_logos');
+      return data ? JSON.parse(data) : {};
+    } catch {
+      return {};
+    }
+  },
+
+  async saveOfficialLogos(logos: OfficialLogos): Promise<void> {
+    try {
+      localStorage.setItem('taourirt_official_logos', JSON.stringify(logos));
+    } catch {}
+    try {
+      await setDoc(doc(db, 'config', 'logos'), {
+        ...logos,
+        updatedAt: serverTimestamp()
+      }, { merge: true });
+    } catch (e) {
+      console.error("Error saving official logos to Firestore:", e);
+    }
+  },
+
   // TOURNAMENTS
   async getTournaments(): Promise<Tournament[]> {
     try {
@@ -168,9 +258,14 @@ export const DataService = {
   },
 
   async addTournament(tournament: Omit<Tournament, 'id'>): Promise<Tournament> {
+    const activeDirId = this.getActiveDirectorateId();
+    const tournamentWithDir = {
+      ...tournament,
+      directorateId: tournament.directorateId || activeDirId
+    };
     const tempId = `tourn-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
     const newTournament: Tournament = {
-      ...tournament,
+      ...tournamentWithDir,
       id: tempId
     };
 
@@ -183,7 +278,7 @@ export const DataService = {
     // Sync to Firestore if online
     try {
       const docRef = await addDoc(collection(db, 'tournaments'), {
-        ...tournament,
+        ...tournamentWithDir,
         createdAt: Timestamp.now()
       });
       const realId = docRef.id;
@@ -195,6 +290,27 @@ export const DataService = {
       setLocal(STORAGE_KEYS.TOURNAMENTS, synced);
     } catch (e) {
       console.warn("Saved locally; Firestore sync pending:", e);
+    }
+
+    // Automatically set sport isProgrammed to true and merge ageCategories in database & cache when a tournament is created
+    try {
+      const sportId = tournament.sportId;
+      const currentSports = getLocal<Sport>('taourirt_sports_config', []);
+      const targetSport = currentSports.find(s => s.id === sportId);
+      const existingCats = (targetSport?.ageCategories || ['U12', 'U15', 'U18', 'U20']).map(normalizeCategoryKey);
+      const normCat = normalizeCategoryKey(tournament.ageCategory);
+      const newCats = Array.from(new Set([...existingCats, normCat].filter(c => ['U12', 'U15', 'U18', 'U20'].includes(c))));
+      
+      const updatedSports = currentSports.map(s => s.id === sportId ? { ...s, isProgrammed: true, ageCategories: newCats } : s);
+      setLocal('taourirt_sports_config', updatedSports);
+
+      await setDoc(doc(db, 'sports', sportId), {
+        isProgrammed: true,
+        ageCategories: newCats,
+        updatedAt: serverTimestamp()
+      }, { merge: true });
+    } catch (e) {
+      console.warn("Could not update sport programmed status in Firestore:", e);
     }
 
     return newTournament;
@@ -209,6 +325,35 @@ export const DataService = {
       await deleteDoc(doc(db, 'tournaments', id));
     } catch (e) {
       console.warn("Deleted locally:", e);
+    }
+  },
+
+  async bulkDeleteTournamentsBySport(sportId: string): Promise<void> {
+    const localList = getLocal<Tournament>(STORAGE_KEYS.TOURNAMENTS, INITIAL_TOURNAMENTS);
+    const tournamentsToDelete = localList.filter(t => t.sportId === sportId);
+    const updatedTournaments = localList.filter(t => t.sportId !== sportId);
+    setLocal(STORAGE_KEYS.TOURNAMENTS, updatedTournaments);
+
+    for (const tourn of tournamentsToDelete) {
+      try {
+        await deleteDoc(doc(db, 'tournaments', tourn.id));
+      } catch (e) {
+        console.warn(`Could not delete tournament ${tourn.id} in Firestore:`, e);
+      }
+    }
+
+    try {
+      const currentSports = getLocal<Sport>('taourirt_sports_config', []);
+      const updatedSports = currentSports.map(s => s.id === sportId ? { ...s, isProgrammed: false, ageCategories: [] } : s);
+      setLocal('taourirt_sports_config', updatedSports);
+
+      await setDoc(doc(db, 'sports', sportId), {
+        isProgrammed: false,
+        ageCategories: [],
+        updatedAt: serverTimestamp()
+      }, { merge: true });
+    } catch (e) {
+      console.warn("Could not reset sport programmed status in Firestore:", e);
     }
   },
 
@@ -281,6 +426,62 @@ export const DataService = {
     }
   },
 
+  async updateSportDates(
+    sportId: string,
+    dates: {
+      startDate?: any;
+      endDate?: any;
+      registrationDeadline?: any;
+      status?: Tournament['status'];
+      description?: string;
+    }
+  ): Promise<void> {
+    const localList = getLocal<Tournament>(STORAGE_KEYS.TOURNAMENTS, INITIAL_TOURNAMENTS);
+    const updated = localList.map(t => {
+      if (t.sportId === sportId) {
+        return {
+          ...t,
+          ...(dates.startDate !== undefined ? { startDate: dates.startDate } : {}),
+          ...(dates.endDate !== undefined ? { endDate: dates.endDate } : {}),
+          ...(dates.registrationDeadline !== undefined ? { registrationDeadline: dates.registrationDeadline } : {}),
+          ...(dates.status !== undefined ? { status: dates.status } : {}),
+          ...(dates.description !== undefined ? { description: dates.description } : {}),
+          updatedAt: new Date()
+        };
+      }
+      return t;
+    });
+    setLocal(STORAGE_KEYS.TOURNAMENTS, updated);
+
+    try {
+      const snap = await getDocs(query(collection(db, 'tournaments'), where('sportId', '==', sportId)));
+      const promises = snap.docs.map(d => {
+        const updatePayload: any = {
+          updatedAt: serverTimestamp()
+        };
+        if (dates.startDate !== undefined) {
+          updatePayload.startDate = dates.startDate instanceof Date ? Timestamp.fromDate(dates.startDate) : dates.startDate;
+        }
+        if (dates.endDate !== undefined) {
+          updatePayload.endDate = dates.endDate instanceof Date ? Timestamp.fromDate(dates.endDate) : dates.endDate;
+        }
+        if (dates.registrationDeadline !== undefined) {
+          updatePayload.registrationDeadline = dates.registrationDeadline instanceof Date ? Timestamp.fromDate(dates.registrationDeadline) : dates.registrationDeadline;
+        }
+        if (dates.status !== undefined) updatePayload.status = dates.status;
+        if (dates.description !== undefined) updatePayload.description = dates.description;
+        return updateDoc(doc(db, 'tournaments', d.id), updatePayload);
+      });
+      await Promise.all(promises);
+    } catch (e) {
+      console.warn("Updated sport dates locally:", e);
+    }
+  },
+
+  async updateSportDeadline(sportId: string, registrationDeadline: any): Promise<void> {
+    await this.updateSportDates(sportId, { registrationDeadline });
+  },
+
   // MATCHES
   async getMatches(): Promise<Match[]> {
     try {
@@ -297,9 +498,14 @@ export const DataService = {
   },
 
   async addMatch(match: Omit<Match, 'id'>): Promise<Match> {
+    const activeDirId = this.getActiveDirectorateId();
+    const matchWithDir = {
+      ...match,
+      directorateId: match.directorateId || activeDirId
+    };
     const tempId = `mat-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
     const newMatch: Match = {
-      ...match,
+      ...matchWithDir,
       id: tempId
     };
     const localList = getLocal<Match>(STORAGE_KEYS.MATCHES, INITIAL_MATCHES);
@@ -309,7 +515,7 @@ export const DataService = {
 
     try {
       const docRef = await addDoc(collection(db, 'matches'), {
-        ...match,
+        ...matchWithDir,
         updatedAt: Timestamp.now()
       });
       const realId = docRef.id;
@@ -409,36 +615,66 @@ export const DataService = {
     try {
       const snap = await getDocs(collection(db, 'schools'));
       if (!snap.empty) {
-        const firestoreList = snap.docs.map(d => ({ id: d.id, ...d.data() } as School));
-        return deduplicateById(firestoreList);
+        const firestoreList = snap.docs
+          .map(d => ({ id: d.id, ...d.data() } as School))
+          .filter(s => s && s.name && !s.name.includes('الكندي') && !s.name.includes('غير محدد'));
+        setLocal(STORAGE_KEYS.SCHOOLS, firestoreList);
+        return firestoreList;
+      } else {
+        // If Firestore has no schools, return empty list so the Regional/Central admin can add them
+        setLocal(STORAGE_KEYS.SCHOOLS, []);
+        return [];
       }
     } catch (e) {
       console.warn("Firestore schools fetch error:", e);
+      const localList = getLocal<School>(STORAGE_KEYS.SCHOOLS, []);
+      return localList.filter(s => s && s.name && !s.name.includes('الكندي') && !s.name.includes('غير محدد'));
     }
-    const localList = getLocal<School>(STORAGE_KEYS.SCHOOLS, INITIAL_SCHOOLS);
-    return deduplicateById(localList);
+  },
+
+  subscribeToSchools(callback: (schools: School[]) => void): () => void {
+    try {
+      const unsubscribe = onSnapshot(collection(db, 'schools'), (snap) => {
+        const firestoreList = snap.docs
+          .map(d => ({ id: d.id, ...d.data() } as School))
+          .filter(s => s && s.name && !s.name.includes('الكندي') && !s.name.includes('غير محدد'));
+        setLocal(STORAGE_KEYS.SCHOOLS, firestoreList);
+        callback(firestoreList);
+      }, (err) => {
+        console.warn("Real-time schools listener error:", err);
+      });
+      return unsubscribe;
+    } catch (err) {
+      console.warn("Failed to subscribe to schools:", err);
+      return () => {};
+    }
   },
 
   async addSchool(school: Omit<School, 'id'>): Promise<School> {
+    const activeDirId = this.getActiveDirectorateId();
+    const schoolWithDir = {
+      ...school,
+      directorateId: school.directorateId || activeDirId
+    };
     const tempId = `sch-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
     const newSchool: School = {
-      ...school,
+      ...schoolWithDir,
       id: tempId
     };
-    const localList = getLocal<School>(STORAGE_KEYS.SCHOOLS, INITIAL_SCHOOLS);
+    const localList = getLocal<School>(STORAGE_KEYS.SCHOOLS, []);
     const filtered = localList.filter(s => s.id !== tempId);
     const updated = [newSchool, ...filtered];
     setLocal(STORAGE_KEYS.SCHOOLS, updated);
 
     try {
       const docRef = await addDoc(collection(db, 'schools'), {
-        ...school,
+        ...schoolWithDir,
         createdAt: Timestamp.now()
       });
       const realId = docRef.id;
       newSchool.id = realId;
 
-      const currentList = getLocal<School>(STORAGE_KEYS.SCHOOLS, INITIAL_SCHOOLS);
+      const currentList = getLocal<School>(STORAGE_KEYS.SCHOOLS, []);
       const synced = currentList.map(s => s.id === tempId ? { ...s, id: realId } : s);
       setLocal(STORAGE_KEYS.SCHOOLS, synced);
     } catch (e) {
@@ -448,7 +684,7 @@ export const DataService = {
   },
 
   async updateSchool(id: string, updates: Partial<School>): Promise<void> {
-    const localList = getLocal<School>(STORAGE_KEYS.SCHOOLS, INITIAL_SCHOOLS);
+    const localList = getLocal<School>(STORAGE_KEYS.SCHOOLS, []);
     const updated = localList.map(s => s.id === id ? { ...s, ...updates } : s);
     setLocal(STORAGE_KEYS.SCHOOLS, updated);
 
@@ -463,7 +699,7 @@ export const DataService = {
   },
 
   async deleteSchool(id: string): Promise<void> {
-    const localList = getLocal<School>(STORAGE_KEYS.SCHOOLS, INITIAL_SCHOOLS);
+    const localList = getLocal<School>(STORAGE_KEYS.SCHOOLS, []);
     const updated = localList.filter(s => s.id !== id);
     setLocal(STORAGE_KEYS.SCHOOLS, updated);
 
@@ -472,6 +708,79 @@ export const DataService = {
     } catch (e) {
       console.warn("Deleted school locally:", e);
     }
+  },
+
+  async addSchoolsBulk(newSchools: Omit<School, 'id'>[]): Promise<School[]> {
+    const activeDirId = this.getActiveDirectorateId();
+    const existing = await this.getSchools();
+    const createdOrUpdatedList: School[] = [];
+    const updatedMap = new Map<string, School>();
+    
+    // Index existing by clean name
+    existing.forEach(s => {
+      if (s.name) {
+        updatedMap.set(s.name.trim().toLowerCase(), s);
+      }
+    });
+
+    for (const item of newSchools) {
+      const cleanName = item.name?.trim();
+      if (!cleanName) continue;
+      const key = cleanName.toLowerCase();
+      
+      const itemWithDir = {
+        ...item,
+        directorateId: item.directorateId || activeDirId
+      };
+
+      const existingSchool = updatedMap.get(key);
+      if (existingSchool) {
+        // Update existing school properties with new import data
+        const updatedItem: School = {
+          ...existingSchool,
+          ...itemWithDir,
+          name: cleanName,
+          id: existingSchool.id,
+          coordinatorName: itemWithDir.coordinatorName || itemWithDir.teacherName || existingSchool.coordinatorName,
+          teacherName: itemWithDir.coordinatorName || itemWithDir.teacherName || existingSchool.teacherName
+        };
+        updatedMap.set(key, updatedItem);
+        createdOrUpdatedList.push(updatedItem);
+        try {
+          await updateDoc(doc(db, 'schools', existingSchool.id), {
+            ...itemWithDir,
+            updatedAt: Timestamp.now()
+          });
+        } catch (e) {
+          console.warn("Updated school locally:", e);
+        }
+      } else {
+        // Create new school
+        const tempId = `sch-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+        const newSchool: School = {
+          ...itemWithDir,
+          id: tempId,
+          name: cleanName,
+          coordinatorName: itemWithDir.coordinatorName || itemWithDir.teacherName || '',
+          teacherName: itemWithDir.coordinatorName || itemWithDir.teacherName || ''
+        };
+        try {
+          const docRef = await addDoc(collection(db, 'schools'), {
+            ...itemWithDir,
+            createdAt: Timestamp.now()
+          });
+          newSchool.id = docRef.id;
+        } catch (e) {
+          console.warn("Saved school locally:", e);
+        }
+        updatedMap.set(key, newSchool);
+        createdOrUpdatedList.push(newSchool);
+      }
+    }
+
+    const finalList = Array.from(updatedMap.values());
+    setLocal(STORAGE_KEYS.SCHOOLS, finalList);
+    return createdOrUpdatedList;
   },
 
   // VENUES
@@ -490,9 +799,14 @@ export const DataService = {
   },
 
   async addVenue(venue: Omit<Venue, 'id'>): Promise<Venue> {
+    const activeDirId = this.getActiveDirectorateId();
+    const venueWithDir = {
+      ...venue,
+      directorateId: venue.directorateId || activeDirId
+    };
     const tempId = `ven-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
     const newVenue: Venue = {
-      ...venue,
+      ...venueWithDir,
       id: tempId
     };
     const localList = getLocal<Venue>(STORAGE_KEYS.VENUES, INITIAL_VENUES);
@@ -502,7 +816,7 @@ export const DataService = {
 
     try {
       const docRef = await addDoc(collection(db, 'venues'), {
-        ...venue,
+        ...venueWithDir,
         createdAt: Timestamp.now()
       });
       const realId = docRef.id;
@@ -611,13 +925,18 @@ export const DataService = {
   },
 
   async addReferee(referee: Omit<Referee, 'id'>): Promise<Referee> {
-    const newRef: Referee = { ...referee, id: `ref-${Date.now()}` };
+    const activeDirId = this.getActiveDirectorateId();
+    const refereeWithDir = {
+      ...referee,
+      directorateId: referee.directorateId || activeDirId
+    };
+    const newRef: Referee = { ...refereeWithDir, id: `ref-${Date.now()}` };
     const list = getLocal<Referee>('referees', []);
     setLocal('referees', [newRef, ...list]);
 
     try {
       const docRef = await addDoc(collection(db, 'referees'), {
-        ...referee,
+        ...refereeWithDir,
         createdAt: Timestamp.now()
       });
       newRef.id = docRef.id;
@@ -837,6 +1156,158 @@ export const DataService = {
     }
   },
 
+  async deleteUser(userId: string): Promise<void> {
+    try {
+      await deleteDoc(doc(db, 'users', userId));
+    } catch (e) {
+      console.warn("Deleted from Firestore failed, proceeding with local:", e);
+    }
+
+    try {
+      const localUsersRaw = localStorage.getItem('local_registered_users');
+      if (localUsersRaw) {
+        const users = JSON.parse(localUsersRaw) as User[];
+        const updated = users.filter(u => u.id !== userId);
+        localStorage.setItem('local_registered_users', JSON.stringify(updated));
+      }
+    } catch (e) {
+      console.warn("Local storage delete user error:", e);
+    }
+  },
+
+  // DIRECTORATE TRANSFER WORKFLOW FOR TEACHERS
+  async requestTeacherTransfer(
+    userId: string,
+    targetDirectorateId: string,
+    targetDirectoratePin: string
+  ): Promise<{ success: boolean; message: string; transfer?: DirectorateTransferRequest }> {
+    // 1. Verify PIN for target directorate
+    const isPinValid = await this.verifyDirectorateCode(targetDirectorateId, targetDirectoratePin.trim());
+    if (!isPinValid) {
+      return { success: false, message: 'القن السري للمديرية الإقليمية المستهدفة غير صحيح. يرجى التأكد وإعادة المحاولة.' };
+    }
+
+    // 2. Fetch target directorate details
+    const directorates = await this.getDirectorates();
+    const targetDir = directorates.find(d => d.id === targetDirectorateId);
+    if (!targetDir) {
+      return { success: false, message: 'المديرية الإقليمية المستهدفة غير موجودة.' };
+    }
+
+    // 3. Fetch user details
+    const users = await this.getUsers();
+    const currentUser = users.find(u => u.id === userId);
+    if (!currentUser) {
+      return { success: false, message: 'تعذر العثور على حساب الأستاذ.' };
+    }
+
+    const currentDirId = currentUser.directorateId || 'taourirt';
+    if (currentDirId === targetDirectorateId) {
+      return { success: false, message: 'أنت منتمٍ بالفعل لهذه المديرية الإقليمية.' };
+    }
+
+    const currentDir = directorates.find(d => d.id === currentDirId);
+
+    // 4. Create pending transfer object
+    const transferReq: DirectorateTransferRequest = {
+      targetDirectorateId,
+      targetDirectorateName: targetDir.name,
+      targetDirectorateRegion: targetDir.region,
+      currentDirectorateId: currentDirId,
+      currentDirectorateName: currentDir?.name || 'المديرية الإقليمية بتاوريرت',
+      requestedAt: new Date().toISOString(),
+      status: 'pending',
+      teacherId: currentUser.id,
+      teacherName: currentUser.fullName,
+      leaseNumber: currentUser.leaseNumber,
+      workLocation: currentUser.workLocation,
+      phone: currentUser.phone,
+      teachingCadre: currentUser.teachingCadre
+    };
+
+    // 5. Update user profile with pendingTransfer (do NOT change directorateId yet!)
+    await this.updateUserProfile(userId, {
+      pendingTransfer: transferReq
+    });
+
+    // 6. Send system notification to the sport managers / coordinators of the target directorate
+    try {
+      await this.addNotification({
+        title: `طلب انتقال أستاذ وارد: ${currentUser.fullName}`,
+        body: `طلب الأستاذ ${currentUser.fullName} (رقم التأجير: ${currentUser.leaseNumber || 'غير محدد'}) الانتقال إلى ${targetDir.name}. بانتظار موافقتكم.`,
+        role: 'SPORT_MANAGER',
+        directorateId: targetDirectorateId
+      });
+    } catch (e) {
+      console.warn("Notification dispatch for transfer request warning:", e);
+    }
+
+    return {
+      success: true,
+      message: `تم التحقق من القن السري وتقديم طلب الانتقال إلى مديرية ${targetDir.name} بنجاح. الطلب الآن قيد المعالجة في انتظار موافقة المسؤول الإقليمي.`,
+      transfer: transferReq
+    };
+  },
+
+  async cancelTeacherTransfer(userId: string): Promise<void> {
+    await this.updateUserProfile(userId, {
+      pendingTransfer: null
+    });
+  },
+
+  async approveTeacherTransfer(
+    teacherId: string,
+    targetDirectorateId: string,
+    targetDirectorateName: string
+  ): Promise<void> {
+    // Update teacher profile: assign new directorate and clear pending transfer
+    await this.updateUserProfile(teacherId, {
+      directorateId: targetDirectorateId,
+      directorateName: targetDirectorateName,
+      pendingTransfer: null
+    });
+
+    // Send confirmation notification to the teacher
+    try {
+      await this.addNotification({
+        title: 'تهانينا! تمت الموافقة على طلب انتقالكم 🎉',
+        body: `وافق المسؤول الإقليمي لـ (${targetDirectorateName}) على طلب انتقالك. يمكنك الآن الولوج والتفاعل مع كافة أنشطة مديريتك الجديدة.`,
+        userIds: [teacherId],
+        role: 'TEACHER',
+        directorateId: targetDirectorateId
+      });
+    } catch (e) {
+      console.warn("Approval notification error:", e);
+    }
+  },
+
+  async rejectTeacherTransfer(teacherId: string, reason?: string): Promise<void> {
+    await this.updateUserProfile(teacherId, {
+      pendingTransfer: null
+    });
+
+    try {
+      await this.addNotification({
+        title: 'إشعار بشأن طلب الانتقال',
+        body: `نأسف لإبلاغكم بأنه لم تتم الموافقة على طلب الانتقال إلى المديرية المطلوبة${reason ? `: ${reason}` : ' من قبل المسؤول الإقليمي.'}`,
+        userIds: [teacherId],
+        role: 'TEACHER'
+      });
+    } catch (e) {
+      console.warn("Rejection notification error:", e);
+    }
+  },
+
+  async getPendingTransfersForDirectorate(targetDirectorateId: string): Promise<User[]> {
+    const users = await this.getUsers();
+    return users.filter(u => 
+      u.role === 'TEACHER' && 
+      u.pendingTransfer && 
+      u.pendingTransfer.status === 'pending' &&
+      u.pendingTransfer.targetDirectorateId === targetDirectorateId
+    );
+  },
+
   // Direct phone update for teacher, school principal, or referee
   async updateContactPhone(target: {
     type: 'teacher' | 'school' | 'principal' | 'referee';
@@ -1018,7 +1489,15 @@ export const DataService = {
         isCustom: true
       }));
 
-    const allSports = deduplicateById<Sport>([...mergedBase, ...customSports]);
+    const allSports = deduplicateById<Sport>([...mergedBase, ...customSports]).map(s => {
+      const rawCats = s.ageCategories && s.ageCategories.length > 0 ? s.ageCategories : allCategoryIds;
+      const normalizedCats = Array.from(new Set(rawCats.map(normalizeCategoryKey))).filter(c => c !== 'OPEN');
+      const validCats = normalizedCats.filter(c => ['U12', 'U15', 'U18', 'U20'].includes(c));
+      return {
+        ...s,
+        ageCategories: validCats.length > 0 ? validCats : allCategoryIds
+      };
+    });
 
     // Keep SPORTS_MAP in sync with all current sports
     allSports.forEach(s => {
@@ -1157,7 +1636,10 @@ export const DataService = {
       const snap = await getDocs(collection(db, 'students'));
       if (!snap.empty) {
         const firestoreList = snap.docs.map(d => ({ id: d.id, ...d.data() } as Student));
-        return deduplicateById(firestoreList);
+        const localList = getLocal<Student>('taourirt_students_data', []);
+        const merged = deduplicateById([...firestoreList, ...localList]);
+        setLocal('taourirt_students_data', merged);
+        return merged;
       }
     } catch (e) {
       console.warn("Firestore fetch students error, using local storage:", e);
@@ -1166,20 +1648,47 @@ export const DataService = {
     return deduplicateById(localList);
   },
 
+  subscribeToStudents(callback: (students: Student[]) => void): () => void {
+    try {
+      const unsubscribe = onSnapshot(collection(db, 'students'), (snap) => {
+        if (!snap.empty) {
+          const firestoreList = snap.docs.map(d => ({ id: d.id, ...d.data() } as Student));
+          const localList = getLocal<Student>('taourirt_students_data', []);
+          const merged = deduplicateById([...firestoreList, ...localList]);
+          setLocal('taourirt_students_data', merged);
+          callback(merged);
+        } else {
+          callback(getLocal<Student>('taourirt_students_data', []));
+        }
+      }, (err) => {
+        console.warn("Real-time students listener error:", err);
+      });
+      return unsubscribe;
+    } catch (err) {
+      console.warn("Failed to subscribe to students:", err);
+      return () => {};
+    }
+  },
+
   async addStudent(student: Omit<Student, 'id' | 'createdAt' | 'updatedAt'>): Promise<Student> {
-    const newStudent: Student = {
+    const activeDirId = this.getActiveDirectorateId();
+    const studentWithDir = {
       ...student,
+      directorateId: (student as any).directorateId || activeDirId
+    };
+    const newStudent: Student = {
+      ...studentWithDir,
       id: `stud-${Date.now()}`,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()
-    };
+    } as any;
 
     const localList = getLocal<Student>('taourirt_students_data', []);
     setLocal('taourirt_students_data', [newStudent, ...localList]);
 
     try {
       await setDoc(doc(db, 'students', newStudent.id), {
-        ...student,
+        ...studentWithDir,
         id: newStudent.id,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp()
@@ -1231,8 +1740,13 @@ export const DataService = {
   },
 
   async addNotification(notification: Omit<AppNotification, 'id' | 'createdAt'>): Promise<AppNotification> {
-    const newNotification: AppNotification = {
+    const activeDirId = this.getActiveDirectorateId();
+    const notificationWithDir = {
       ...notification,
+      directorateId: notification.directorateId || activeDirId
+    };
+    const newNotification: AppNotification = {
+      ...notificationWithDir,
       id: `notif-${Date.now()}`,
       createdAt: new Date().toISOString()
     };
@@ -1242,7 +1756,7 @@ export const DataService = {
 
     try {
       await setDoc(doc(db, 'notifications', newNotification.id), {
-        ...notification,
+        ...notificationWithDir,
         id: newNotification.id,
         createdAt: serverTimestamp()
       });
@@ -1309,5 +1823,392 @@ export const DataService = {
     } catch (err) {
       console.error("Error triggering match notification:", err);
     }
+  },
+
+  async getRoleSidebarPermissions(): Promise<RoleSidebarPermissions> {
+    const DEFAULT_PERMISSIONS: RoleSidebarPermissions = {
+      CENTRAL_ADMIN: ['/dashboard', '/tournaments', '/schools', '/teachers', '/tech-committee', '/referees', '/matches', '/statistics', '/sports-config'],
+      TECH_COMMITTEE_HEAD: ['/dashboard', '/tournaments', '/schools', '/teachers', '/tech-committee', '/referees', '/matches', '/statistics', '/sports-config'],
+      SPORT_MANAGER: ['/dashboard', '/tournaments', '/schools', '/teachers', '/referees', '/matches', '/statistics'],
+      TEACHER: ['/dashboard', '/tournaments', '/schools', '/matches', '/statistics']
+    };
+
+    try {
+      const local = localStorage.getItem('taourirt_role_sidebar_permissions');
+      if (local) {
+        const parsed = JSON.parse(local);
+        return { ...DEFAULT_PERMISSIONS, ...parsed };
+      }
+    } catch (e) {
+      console.error("Error loading local role permissions:", e);
+    }
+    return DEFAULT_PERMISSIONS;
+  },
+
+  async saveRoleSidebarPermissions(permissions: RoleSidebarPermissions): Promise<void> {
+    try {
+      localStorage.setItem('taourirt_role_sidebar_permissions', JSON.stringify(permissions));
+      await setDoc(doc(db, 'settings', 'role_sidebar_permissions'), permissions);
+      window.dispatchEvent(new CustomEvent('sidebarPermissionsChanged', { detail: permissions }));
+    } catch (e) {
+      console.warn("Saved permissions locally; Firestore sync pending:", e);
+      window.dispatchEvent(new CustomEvent('sidebarPermissionsChanged', { detail: permissions }));
+    }
+  },
+
+  // DIRECTORATES MANAGEMENT (Multi-Tenant Architecture)
+  async getDirectorates(): Promise<Directorate[]> {
+    try {
+      const snap = await getDocs(collection(db, 'directorates'));
+      if (!snap.empty) {
+        const firestoreList = snap.docs.map(d => ({ id: d.id, ...d.data() } as Directorate));
+        return deduplicateById(firestoreList);
+      }
+    } catch (e) {
+      console.warn("Firestore directorates fetch error, falling back to cache:", e);
+    }
+    const localList = getLocal<Directorate>(STORAGE_KEYS.DIRECTORATES, INITIAL_DIRECTORATES);
+    return deduplicateById(localList);
+  },
+
+  async addDirectorate(directorate: Omit<Directorate, 'id'> & { id?: string }): Promise<Directorate> {
+    const rawId = directorate.id || `dir_${(directorate.shortName || directorate.name || 'dir').toLowerCase().replace(/[^a-z0-9]/g, '_')}_${Date.now().toString(36)}`;
+    const tempId = rawId;
+    const newDir: Directorate = {
+      ...directorate,
+      id: tempId,
+      isActive: directorate.isActive !== undefined ? directorate.isActive : true,
+      adminEmails: (directorate.adminEmails || []).map(e => e.trim().toLowerCase()).filter(Boolean),
+      createdAt: new Date()
+    };
+
+    const localList = getLocal<Directorate>(STORAGE_KEYS.DIRECTORATES, INITIAL_DIRECTORATES);
+    const updated = [newDir, ...localList.filter(d => d.id !== tempId)];
+    setLocal(STORAGE_KEYS.DIRECTORATES, updated);
+
+    try {
+      await setDoc(doc(db, 'directorates', tempId), {
+        ...newDir,
+        createdAt: Timestamp.now()
+      });
+    } catch (e) {
+      console.warn("Directorate saved locally; Firestore sync error:", e);
+    }
+
+    window.dispatchEvent(new CustomEvent('directoratesListUpdated', { detail: updated }));
+    return newDir;
+  },
+
+  async updateDirectorate(id: string, updates: Partial<Directorate>): Promise<void> {
+    const localList = getLocal<Directorate>(STORAGE_KEYS.DIRECTORATES, INITIAL_DIRECTORATES);
+    const cleanUpdates = {
+      ...updates,
+      ...(updates.adminEmails ? { adminEmails: updates.adminEmails.map(e => e.trim().toLowerCase()).filter(Boolean) } : {})
+    };
+    const updated = localList.map(d => d.id === id ? { ...d, ...cleanUpdates } : d);
+    setLocal(STORAGE_KEYS.DIRECTORATES, updated);
+
+    try {
+      await updateDoc(doc(db, 'directorates', id), {
+        ...cleanUpdates,
+        updatedAt: serverTimestamp()
+      });
+    } catch (e) {
+      console.warn("Directorate updated locally:", e);
+    }
+
+    window.dispatchEvent(new CustomEvent('directoratesListUpdated', { detail: updated }));
+  },
+
+  async deleteDirectorate(id: string): Promise<void> {
+    const localList = getLocal<Directorate>(STORAGE_KEYS.DIRECTORATES, INITIAL_DIRECTORATES);
+    const updated = localList.filter(d => d.id !== id);
+    setLocal(STORAGE_KEYS.DIRECTORATES, updated);
+
+    try {
+      await deleteDoc(doc(db, 'directorates', id));
+    } catch (e) {
+      console.warn("Directorate deleted locally:", e);
+    }
+
+    window.dispatchEvent(new CustomEvent('directoratesListUpdated', { detail: updated }));
+  },
+
+  getActiveDirectorateId(): string {
+    return localStorage.getItem('active_directorate_id') || 'taourirt';
+  },
+
+  setActiveDirectorateId(id: string): void {
+    localStorage.setItem('active_directorate_id', id);
+    window.dispatchEvent(new CustomEvent('directorateChanged', { detail: id }));
+  },
+
+  async getActiveDirectorate(): Promise<Directorate> {
+    const activeId = this.getActiveDirectorateId();
+    const all = await this.getDirectorates();
+    const found = all.find(d => d.id === activeId);
+    return found || all[0] || INITIAL_DIRECTORATES[0];
+  },
+
+  async verifyDirectorateCode(directorateId: string, inputCode: string): Promise<boolean> {
+    const all = await this.getDirectorates();
+    const dir = all.find(d => d.id === directorateId);
+    if (!dir) return false;
+    const cleanDirCode = (dir.code || '').trim().toUpperCase();
+    const cleanInput = (inputCode || '').trim().toUpperCase();
+    return cleanDirCode === cleanInput;
+  },
+
+  async getCrossCountryResults(): Promise<Record<string, CrossCountryCategoryResult>> {
+    const activeDirId = this.getActiveDirectorateId();
+    const cacheKey = `taourirt_cc_results_${activeDirId}`;
+    try {
+      const snap = await getDocs(collection(db, 'cross_country_results'));
+      if (!snap.empty) {
+        const resultsMap: Record<string, CrossCountryCategoryResult> = {};
+        snap.docs.forEach(docSnap => {
+          const data = docSnap.data() as CrossCountryCategoryResult;
+          if (!data.directorateId || data.directorateId === activeDirId) {
+            resultsMap[data.categoryId || docSnap.id] = { ...data, categoryId: data.categoryId || docSnap.id };
+          }
+        });
+        if (Object.keys(resultsMap).length > 0) {
+          const merged = { ...INITIAL_CROSS_COUNTRY_RESULTS, ...resultsMap };
+          localStorage.setItem(cacheKey, JSON.stringify(merged));
+          return merged;
+        }
+      }
+    } catch (e) {
+      console.warn("Firestore fetch cross_country_results error, using local storage:", e);
+    }
+
+    // Check local storage
+    try {
+      const local = localStorage.getItem(cacheKey);
+      if (local) {
+        const parsed = JSON.parse(local);
+        return { ...INITIAL_CROSS_COUNTRY_RESULTS, ...parsed };
+      }
+    } catch (e) {
+      console.error("Local storage error reading cross country results:", e);
+    }
+    return { ...INITIAL_CROSS_COUNTRY_RESULTS };
+  },
+
+  async saveCrossCountryCategoryResult(result: CrossCountryCategoryResult): Promise<void> {
+    const activeDirId = this.getActiveDirectorateId();
+    const cacheKey = `taourirt_cc_results_${activeDirId}`;
+    const resultWithDir: CrossCountryCategoryResult = {
+      ...result,
+      directorateId: result.directorateId || activeDirId,
+      updatedAt: new Date().toISOString()
+    };
+
+    // Update local cache
+    try {
+      const current = await this.getCrossCountryResults();
+      current[result.categoryId] = resultWithDir;
+      localStorage.setItem(cacheKey, JSON.stringify(current));
+    } catch (e) {
+      console.error("Error updating local CC results:", e);
+    }
+
+    // Sync to Firestore
+    try {
+      const docId = `${activeDirId}_${result.categoryId}`;
+      await setDoc(doc(db, 'cross_country_results', docId), {
+        ...resultWithDir,
+        updatedAt: serverTimestamp()
+      }, { merge: true });
+    } catch (e) {
+      console.warn("Firestore save CC result error:", e);
+    }
+
+    window.dispatchEvent(new CustomEvent('crossCountryResultsUpdated', { detail: resultWithDir }));
+  },
+
+  async syncAllDataFromCloud(): Promise<{
+    success: boolean;
+    schoolsCount: number;
+    tournamentsCount: number;
+    studentsCount: number;
+    matchesCount: number;
+    venuesCount: number;
+    refereesCount: number;
+    directoratesCount: number;
+    timestamp: number;
+  }> {
+    try {
+      const [
+        schoolsSnap,
+        tournamentsSnap,
+        studentsSnap,
+        matchesSnap,
+        venuesSnap,
+        refereesSnap,
+        directoratesSnap,
+        sportsSnap,
+        ccSnap
+      ] = await Promise.all([
+        getDocs(collection(db, 'schools')).catch(() => null),
+        getDocs(collection(db, 'tournaments')).catch(() => null),
+        getDocs(collection(db, 'students')).catch(() => null),
+        getDocs(collection(db, 'matches')).catch(() => null),
+        getDocs(collection(db, 'venues')).catch(() => null),
+        getDocs(collection(db, 'referees')).catch(() => null),
+        getDocs(collection(db, 'directorates')).catch(() => null),
+        getDocs(collection(db, 'sports')).catch(() => null),
+        getDocs(collection(db, 'cross_country_results')).catch(() => null)
+      ]);
+
+      let schoolsCount = 0;
+      if (schoolsSnap && !schoolsSnap.empty) {
+        const firestoreSchools = schoolsSnap.docs.map(d => ({ id: d.id, ...d.data() } as School));
+        const localList = getLocal<School>(STORAGE_KEYS.SCHOOLS, INITIAL_SCHOOLS);
+        const merged = deduplicateById([...firestoreSchools, ...localList]);
+        setLocal(STORAGE_KEYS.SCHOOLS, merged);
+        schoolsCount = merged.length;
+      } else {
+        const localList = getLocal<School>(STORAGE_KEYS.SCHOOLS, INITIAL_SCHOOLS);
+        schoolsCount = localList.length;
+      }
+
+      let tournamentsCount = 0;
+      if (tournamentsSnap && !tournamentsSnap.empty) {
+        const firestoreTournaments = tournamentsSnap.docs.map(d => {
+          const data = d.data();
+          return {
+            id: d.id,
+            ...data,
+            startDate: data.startDate?.toDate ? data.startDate.toDate() : data.startDate,
+            endDate: data.endDate?.toDate ? data.endDate.toDate() : data.endDate,
+            registrationDeadline: data.registrationDeadline?.toDate ? data.registrationDeadline.toDate() : data.registrationDeadline,
+          } as Tournament;
+        });
+        const localList = getLocal<Tournament>(STORAGE_KEYS.TOURNAMENTS, INITIAL_TOURNAMENTS);
+        const merged = deduplicateById([...firestoreTournaments, ...localList]);
+        setLocal(STORAGE_KEYS.TOURNAMENTS, merged);
+        tournamentsCount = merged.length;
+      } else {
+        const localList = getLocal<Tournament>(STORAGE_KEYS.TOURNAMENTS, INITIAL_TOURNAMENTS);
+        tournamentsCount = localList.length;
+      }
+
+      let studentsCount = 0;
+      if (studentsSnap && !studentsSnap.empty) {
+        const firestoreStudents = studentsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Student));
+        const localList = getLocal<Student>('taourirt_students_data', []);
+        const merged = deduplicateById([...firestoreStudents, ...localList]);
+        setLocal('taourirt_students_data', merged);
+        studentsCount = merged.length;
+      } else {
+        const localList = getLocal<Student>('taourirt_students_data', []);
+        studentsCount = localList.length;
+      }
+
+      let matchesCount = 0;
+      if (matchesSnap && !matchesSnap.empty) {
+        const firestoreMatches = matchesSnap.docs.map(d => ({ id: d.id, ...d.data() } as Match));
+        const localList = getLocal<Match>(STORAGE_KEYS.MATCHES, INITIAL_MATCHES);
+        const merged = deduplicateById([...firestoreMatches, ...localList]);
+        setLocal(STORAGE_KEYS.MATCHES, merged);
+        matchesCount = merged.length;
+      } else {
+        const localList = getLocal<Match>(STORAGE_KEYS.MATCHES, INITIAL_MATCHES);
+        matchesCount = localList.length;
+      }
+
+      let venuesCount = 0;
+      if (venuesSnap && !venuesSnap.empty) {
+        const firestoreVenues = venuesSnap.docs.map(d => ({ id: d.id, ...d.data() } as Venue));
+        const localList = getLocal<Venue>(STORAGE_KEYS.VENUES, INITIAL_VENUES);
+        const merged = deduplicateById([...firestoreVenues, ...localList]);
+        setLocal(STORAGE_KEYS.VENUES, merged);
+        venuesCount = merged.length;
+      }
+
+      let refereesCount = 0;
+      if (refereesSnap && !refereesSnap.empty) {
+        const firestoreReferees = refereesSnap.docs.map(d => ({ id: d.id, ...d.data() } as Referee));
+        const localList = getLocal<Referee>('taourirt_referees_data', []);
+        const merged = deduplicateById([...firestoreReferees, ...localList]);
+        setLocal('taourirt_referees_data', merged);
+        refereesCount = merged.length;
+      }
+
+      let directoratesCount = 0;
+      if (directoratesSnap && !directoratesSnap.empty) {
+        const firestoreDirs = directoratesSnap.docs.map(d => ({ id: d.id, ...d.data() } as Directorate));
+        const localList = getLocal<Directorate>('app_directorates_data', INITIAL_DIRECTORATES);
+        const merged = deduplicateById([...firestoreDirs, ...localList]);
+        setLocal('app_directorates_data', merged);
+        directoratesCount = merged.length;
+      }
+
+      if (sportsSnap && !sportsSnap.empty) {
+        const firestoreSports = sportsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Sport));
+        const localList = getLocal<Sport>('taourirt_sports_config', []);
+        const merged = deduplicateById([...firestoreSports, ...localList]);
+        setLocal('taourirt_sports_config', merged);
+      }
+
+      if (ccSnap && !ccSnap.empty) {
+        const activeDirId = this.getActiveDirectorateId();
+        const resultsMap: Record<string, CrossCountryCategoryResult> = {};
+        ccSnap.docs.forEach(docSnap => {
+          const data = docSnap.data() as CrossCountryCategoryResult;
+          if (!data.directorateId || data.directorateId === activeDirId) {
+            resultsMap[data.categoryId || docSnap.id] = { ...data, categoryId: data.categoryId || docSnap.id };
+          }
+        });
+        if (Object.keys(resultsMap).length > 0) {
+          const cacheKey = `taourirt_cc_results_${activeDirId}`;
+          const merged = { ...INITIAL_CROSS_COUNTRY_RESULTS, ...resultsMap };
+          localStorage.setItem(cacheKey, JSON.stringify(merged));
+        }
+      }
+
+      // Dispatch real-time global refresh events across all app components and open tabs
+      window.dispatchEvent(new CustomEvent('dataSynchronized', {
+        detail: {
+          timestamp: Date.now(),
+          schoolsCount,
+          tournamentsCount,
+          studentsCount,
+          matchesCount
+        }
+      }));
+      window.dispatchEvent(new CustomEvent('schoolsUpdated'));
+      window.dispatchEvent(new CustomEvent('tournamentsUpdated'));
+      window.dispatchEvent(new CustomEvent('studentsUpdated'));
+      window.dispatchEvent(new CustomEvent('matchesUpdated'));
+      window.dispatchEvent(new CustomEvent('directoratesListUpdated'));
+
+      return {
+        success: true,
+        schoolsCount,
+        tournamentsCount,
+        studentsCount,
+        matchesCount,
+        venuesCount,
+        refereesCount,
+        directoratesCount,
+        timestamp: Date.now()
+      };
+    } catch (error) {
+      console.error("syncAllDataFromCloud error:", error);
+      return {
+        success: false,
+        schoolsCount: 0,
+        tournamentsCount: 0,
+        studentsCount: 0,
+        matchesCount: 0,
+        venuesCount: 0,
+        refereesCount: 0,
+        directoratesCount: 0,
+        timestamp: Date.now()
+      };
+    }
   }
 };
+

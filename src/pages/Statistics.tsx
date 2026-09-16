@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { DataService, SPORTS_MAP, deduplicateById } from '../lib/dataService';
-import { School, Match, Student, Tournament, Sport } from '../types';
+import { School, Match, Student, Tournament, Sport, Directorate } from '../types';
 import {
   BarChart3,
   Trophy,
@@ -24,6 +24,7 @@ import {
 
 export const Statistics: React.FC = () => {
   const [schools, setSchools] = useState<School[]>([]);
+  const [activeDirObj, setActiveDirObj] = useState<Directorate | null>(null);
   const [matches, setMatches] = useState<Match[]>([]);
   const [students, setStudents] = useState<Student[]>([]);
   const [tournaments, setTournaments] = useState<Tournament[]>([]);
@@ -39,22 +40,38 @@ export const Statistics: React.FC = () => {
 
   useEffect(() => {
     loadAllData();
+    const handleDirChange = () => {
+      loadAllData();
+    };
+    window.addEventListener('directorateChanged', handleDirChange);
+    return () => {
+      window.removeEventListener('directorateChanged', handleDirChange);
+    };
   }, []);
 
   const loadAllData = async () => {
     setLoading(true);
     try {
-      const [sList, mList, stList, tList, cfgList] = await Promise.all([
+      const activeDirId = DataService.getActiveDirectorateId();
+      const [sList, mList, stList, tList, cfgList, activeDir] = await Promise.all([
         DataService.getSchools(),
         DataService.getMatches(),
         DataService.getStudents(),
         DataService.getTournaments(),
-        DataService.getSportsConfig()
+        DataService.getSportsConfig(),
+        DataService.getActiveDirectorate()
       ]);
-      setSchools(deduplicateById<School>(sList));
-      setMatches(mList);
-      setStudents(stList);
-      setTournaments(tList);
+
+      const dirSchools = sList.filter(s => (s.directorateId || 'taourirt') === activeDirId);
+      const dirMatches = mList.filter(m => (m.directorateId || 'taourirt') === activeDirId);
+      const dirStudents = stList.filter(st => (st.directorateId || 'taourirt') === activeDirId);
+      const dirTournaments = tList.filter(t => (t.directorateId || 'taourirt') === activeDirId);
+
+      setActiveDirObj(activeDir);
+      setSchools(deduplicateById<School>(dirSchools));
+      setMatches(dirMatches);
+      setStudents(dirStudents);
+      setTournaments(deduplicateById<Tournament>(dirTournaments));
       setSportsConfig(cfgList);
     } catch (e) {
       console.error('Error loading stats data:', e);
@@ -558,7 +575,7 @@ export const Statistics: React.FC = () => {
             <span className="bg-indigo-600 text-white text-[10px] font-black px-2.5 py-0.5 rounded-full uppercase tracking-wider">
               لوحة الإحصائيات الشاملة 📊
             </span>
-            <span className="text-slate-400 text-xs font-medium">| المديرية الإقليمية تاوريرت</span>
+            <span className="text-slate-400 text-xs font-medium">| {activeDirObj?.name || 'المديرية الإقليمية'}</span>
           </div>
           <h2 className="text-lg md:text-xl font-black text-white">
             إحصائيات المشاركة والنتائج المسجلة للمؤسسات التعليمية

@@ -92,6 +92,11 @@ export const DailyWhatsAppNotificationCenter: React.FC<DailyWhatsAppNotification
   const isCentralAdmin = userProfile?.role === 'CENTRAL_ADMIN';
   const isSportManager = userProfile?.role === 'SPORT_MANAGER';
   const isTechCommitteeHead = userProfile?.isTechCommitteeHead === true;
+  const isRegionalManager = (userProfile?.role as any) === 'REGIONAL_MANAGER' || isCentralAdmin;
+
+  // Authorization rule: Only Tech Committee Heads, Regional Managers, or Central Admin can send notifications
+  // Teachers (TEACHER) are strictly restricted from sending broadcast or individual notifications
+  const canSendNotifications = isCentralAdmin || isRegionalManager || isTechCommitteeHead || isSportManager;
 
   const authorizedSportIds: string[] | null = useMemo(() => {
     if (isCentralAdmin) return null; // all sports allowed
@@ -553,6 +558,12 @@ export const DailyWhatsAppNotificationCenter: React.FC<DailyWhatsAppNotification
   // ONE-CLICK UNIFIED BROADCAST ENGINE (زر واحد يرسل الاشعار الموحد لجميع المعنيين)
   // =========================================================================
   const handleOneClickUnifiedBroadcast = async (matchItem: typeof enrichedMatches[0]) => {
+    // 0. Authorization check: Only Tech Committee Heads, Regional Managers, or Central Admin
+    if (!canSendNotifications) {
+      toast.error('صلاحية مقيدة: يحق فقط لرؤساء اللجن التقنية أو المسؤول الإقليمي أو المركز إرسال الإشعارات.');
+      return;
+    }
+
     // 1. Security check: verify user is authorized for this sport
     if (authorizedSportIds !== null && !authorizedSportIds.includes(matchItem.sportId)) {
       toast.error(`عذراً، بصفتك رئيس لجنة تقنية يمكنك إشعار المعنيين برياضتك المحددة فقط.`);
@@ -617,6 +628,11 @@ export const DailyWhatsAppNotificationCenter: React.FC<DailyWhatsAppNotification
 
   // ONE-CLICK GLOBAL BROADCAST FOR ALL TODAY'S MATCHES
   const handleOneClickGlobalDailyBroadcast = async () => {
+    if (!canSendNotifications) {
+      toast.error('صلاحية مقيدة: يحق فقط لرؤساء اللجن التقنية أو المسؤول الإقليمي أو المركز إرسال الإشعارات.');
+      return;
+    }
+
     const todayMatches = filteredEnrichedMatches.filter((m) => m.dateString === todayStr);
     if (todayMatches.length === 0) {
       toast.error('لا توجد مباريات مبرمجة لليوم في نطاق اختصاصك.');
@@ -674,6 +690,11 @@ export const DailyWhatsAppNotificationCenter: React.FC<DailyWhatsAppNotification
     return authorizedSportIds.map((id) => SPORTS_MAP[id]?.name || id).join('، ');
   }, [authorizedSportIds]);
 
+  // لا تظهر هذه النافذة للأستاذ العادي أو الحكم (يطلع فقط على الإشعارات من الجرس)
+  if (!canSendNotifications) {
+    return null;
+  }
+
   return (
     <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden" dir="rtl">
       {/* Header Banner */}
@@ -726,16 +747,18 @@ export const DailyWhatsAppNotificationCenter: React.FC<DailyWhatsAppNotification
               <span>{isRefreshing ? 'جاري التحيين...' : 'تحيين الأرقام'}</span>
             </button>
 
-            {/* Global Day Broadcast Trigger */}
-            <button
-              type="button"
-              onClick={() => setIsGlobalBroadcastOpen(true)}
-              className="bg-amber-400 hover:bg-amber-300 active:scale-95 text-slate-950 font-black px-3.5 py-2 rounded-xl text-xs flex items-center gap-1.5 shadow-md transition-all cursor-pointer"
-              title="إشعار جماعي موحد لكافة مباريات اليوم"
-            >
-              <Zap className="w-4 h-4 fill-slate-950" />
-              <span>إشعار جماعي لليوم ({tabCounts.today})</span>
-            </button>
+            {/* Global Day Broadcast Trigger - Only for Tech Committee Heads, Regional Managers, or Central Admin */}
+            {canSendNotifications && (
+              <button
+                type="button"
+                onClick={() => setIsGlobalBroadcastOpen(true)}
+                className="bg-amber-400 hover:bg-amber-300 active:scale-95 text-slate-950 font-black px-3.5 py-2 rounded-xl text-xs flex items-center gap-1.5 shadow-md transition-all cursor-pointer"
+                title="إشعار جماعي موحد لكافة مباريات اليوم"
+              >
+                <Zap className="w-4 h-4 fill-slate-950" />
+                <span>إشعار جماعي لليوم ({tabCounts.today})</span>
+              </button>
+            )}
           </div>
         </div>
 
@@ -822,15 +845,22 @@ export const DailyWhatsAppNotificationCenter: React.FC<DailyWhatsAppNotification
         </div>
       </div>
 
-      {/* Security Scope Notice for Tech Committee Heads */}
-      {(isTechCommitteeHead || isSportManager) && (
+      {/* Security Scope & Role Permission Notices */}
+      {!canSendNotifications ? (
+        <div className="bg-blue-50/90 border-b border-blue-200 px-4 py-2.5 flex items-center gap-2 text-xs text-blue-950 font-medium">
+          <ShieldAlert className="w-4 h-4 text-blue-700 shrink-0" />
+          <span>
+            <strong>صلاحية إرسال الإشعارات مقيدة:</strong> يحق فقط لرؤساء اللجن التقنية أو المسؤول الإقليمي أو المركز إرسال الإشعار الجماعي أو أي إشعار موجه. حسابك مخصص لمتابعة برمجة المباريات ونسخ تفاصيلها.
+          </span>
+        </div>
+      ) : (isTechCommitteeHead || isSportManager) ? (
         <div className="bg-amber-50/90 border-b border-amber-200 px-4 py-2.5 flex items-center gap-2 text-xs text-amber-900 font-medium">
           <Lock className="w-4 h-4 text-amber-700 shrink-0" />
           <span>
             <strong>نطاق الصلاحية محدد:</strong> بصفتك رئيساً للجنة التقنية لـ (<strong>{authorizedSportsNames}</strong>)، تظهر لك فقط مباريات تخصصك ويتم إرسال الإشعارات للمعنيين بها حصراً.
           </span>
         </div>
-      )}
+      ) : null}
 
       {/* Filter and Search Bar */}
       <div className="p-4 bg-slate-50 border-b border-slate-200 flex flex-col sm:flex-row items-center justify-between gap-3">
@@ -917,16 +947,23 @@ export const DailyWhatsAppNotificationCenter: React.FC<DailyWhatsAppNotification
 
                   {/* Primary Action: ONE-CLICK UNIFIED BROADCAST BUTTON */}
                   <div className="flex flex-wrap items-center gap-2 self-start md:self-auto">
-                    <button
-                      type="button"
-                      onClick={() => handleOneClickUnifiedBroadcast(item)}
-                      disabled={isBroadcastingThis}
-                      className="px-3.5 py-2 bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-700 hover:from-emerald-700 hover:to-teal-800 active:scale-95 text-white text-xs font-black rounded-xl shadow-md flex items-center gap-2 transition-all cursor-pointer"
-                      title="إرسال الإشعار الموحد لجميع المعنيين (المؤطران، الحكام، المدراء) بنقرة واحدة"
-                    >
-                      <Zap className={`w-4 h-4 fill-amber-300 text-amber-300 ${isBroadcastingThis ? 'animate-bounce' : ''}`} />
-                      <span>إرسال موحد لجميع المعنيين ({registeredCount} أطراف) ⚡</span>
-                    </button>
+                    {canSendNotifications ? (
+                      <button
+                        type="button"
+                        onClick={() => handleOneClickUnifiedBroadcast(item)}
+                        disabled={isBroadcastingThis}
+                        className="px-3.5 py-2 bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-700 hover:from-emerald-700 hover:to-teal-800 active:scale-95 text-white text-xs font-black rounded-xl shadow-md flex items-center gap-2 transition-all cursor-pointer"
+                        title="إرسال الإشعار الموحد لجميع المعنيين (المؤطران، الحكام، المدراء) بنقرة واحدة"
+                      >
+                        <Zap className={`w-4 h-4 fill-amber-300 text-amber-300 ${isBroadcastingThis ? 'animate-bounce' : ''}`} />
+                        <span>إرسال موحد لجميع المعنيين ({registeredCount} أطراف) ⚡</span>
+                      </button>
+                    ) : (
+                      <div className="px-3 py-1.5 bg-slate-100 text-slate-500 text-xs font-semibold rounded-xl flex items-center gap-1.5 border border-slate-200">
+                        <Lock className="w-3.5 h-3.5 text-slate-400" />
+                        <span>للاطلاع (الإرسال مقتصر على اللجن والمسؤولين)</span>
+                      </div>
+                    )}
 
                     <button
                       type="button"
@@ -1046,21 +1083,25 @@ export const DailyWhatsAppNotificationCenter: React.FC<DailyWhatsAppNotification
                       </div>
 
                       <div className="pt-2 border-t border-emerald-200/50 flex items-center gap-1.5">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            if (!item.teacher1.phone) {
-                              toast.error(`رقم هاتف أستاذ ${item.team1Name} غير مسجل`);
-                              return;
-                            }
-                            openWhatsApp(item.teacher1.phone, unifiedMsg);
-                            setDispatchedIds((prev) => new Set(prev).add(`t1-${m.id}`));
-                          }}
-                          className="flex-1 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white py-1.5 px-2.5 rounded-lg text-[11px] font-bold flex items-center justify-center gap-1.5 transition-all shadow-xs cursor-pointer"
-                        >
-                          <Send className="w-3 h-3" />
-                          <span>واتساب مؤطر 1</span>
-                        </button>
+                        {canSendNotifications ? (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (!item.teacher1.phone) {
+                                toast.error(`رقم هاتف أستاذ ${item.team1Name} غير مسجل`);
+                                return;
+                              }
+                              openWhatsApp(item.teacher1.phone, unifiedMsg);
+                              setDispatchedIds((prev) => new Set(prev).add(`t1-${m.id}`));
+                            }}
+                            className="flex-1 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white py-1.5 px-2.5 rounded-lg text-[11px] font-bold flex items-center justify-center gap-1.5 transition-all shadow-xs cursor-pointer"
+                          >
+                            <Send className="w-3 h-3" />
+                            <span>واتساب مؤطر 1</span>
+                          </button>
+                        ) : (
+                          <span className="text-[10px] text-slate-500 font-medium py-1">مؤطر معتمد للفريق الأول</span>
+                        )}
                       </div>
                     </div>
 
@@ -1099,21 +1140,25 @@ export const DailyWhatsAppNotificationCenter: React.FC<DailyWhatsAppNotification
                       </div>
 
                       <div className="pt-2 border-t border-emerald-200/50 flex items-center gap-1.5">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            if (!item.teacher2.phone) {
-                              toast.error(`رقم هاتف أستاذ ${item.team2Name} غير مسجل`);
-                              return;
-                            }
-                            openWhatsApp(item.teacher2.phone, unifiedMsg);
-                            setDispatchedIds((prev) => new Set(prev).add(`t2-${m.id}`));
-                          }}
-                          className="flex-1 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white py-1.5 px-2.5 rounded-lg text-[11px] font-bold flex items-center justify-center gap-1.5 transition-all shadow-xs cursor-pointer"
-                        >
-                          <Send className="w-3 h-3" />
-                          <span>واتساب مؤطر 2</span>
-                        </button>
+                        {canSendNotifications ? (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (!item.teacher2.phone) {
+                                toast.error(`رقم هاتف أستاذ ${item.team2Name} غير مسجل`);
+                                return;
+                              }
+                              openWhatsApp(item.teacher2.phone, unifiedMsg);
+                              setDispatchedIds((prev) => new Set(prev).add(`t2-${m.id}`));
+                            }}
+                            className="flex-1 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white py-1.5 px-2.5 rounded-lg text-[11px] font-bold flex items-center justify-center gap-1.5 transition-all shadow-xs cursor-pointer"
+                          >
+                            <Send className="w-3 h-3" />
+                            <span>واتساب مؤطر 2</span>
+                          </button>
+                        ) : (
+                          <span className="text-[10px] text-slate-500 font-medium py-1">مؤطر معتمد للفريق الثاني</span>
+                        )}
                       </div>
                     </div>
 
@@ -1147,21 +1192,25 @@ export const DailyWhatsAppNotificationCenter: React.FC<DailyWhatsAppNotification
 
                       <div className="pt-2 border-t border-amber-200/50 flex flex-col gap-1.5">
                         {item.assignedReferees.length > 0 && (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              const ref = item.assignedReferees[0];
-                              if (!ref?.phone) {
-                                toast.error(`رقم هاتف الحكم غير مسجل`);
-                                return;
-                              }
-                              openWhatsApp(ref.phone, unifiedMsg);
-                            }}
-                            className="w-full bg-amber-600 hover:bg-amber-700 active:scale-95 text-white py-1.5 px-2 rounded-lg text-[10px] font-bold flex items-center justify-center gap-1 transition-all shadow-xs cursor-pointer truncate"
-                          >
-                            <Send className="w-2.5 h-2.5 shrink-0" />
-                            <span className="truncate">توجيه للحكم: {item.assignedReferees[0].name.split(' ')[0]}</span>
-                          </button>
+                          canSendNotifications ? (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const ref = item.assignedReferees[0];
+                                if (!ref?.phone) {
+                                  toast.error(`رقم هاتف الحكم غير مسجل`);
+                                  return;
+                                }
+                                openWhatsApp(ref.phone, unifiedMsg);
+                              }}
+                              className="w-full bg-amber-600 hover:bg-amber-700 active:scale-95 text-white py-1.5 px-2 rounded-lg text-[10px] font-bold flex items-center justify-center gap-1 transition-all shadow-xs cursor-pointer truncate"
+                            >
+                              <Send className="w-2.5 h-2.5 shrink-0" />
+                              <span className="truncate">توجيه للحكم: {item.assignedReferees[0].name.split(' ')[0]}</span>
+                            </button>
+                          ) : (
+                            <span className="text-[10px] text-slate-500 font-medium py-1">طاقم التحكيم الرسمي</span>
+                          )
                         )}
                       </div>
                     </div>
@@ -1203,21 +1252,25 @@ export const DailyWhatsAppNotificationCenter: React.FC<DailyWhatsAppNotification
                       </div>
 
                       <div className="pt-2 border-t border-blue-200/50 flex flex-col gap-1.5">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            const pPhone = item.school1?.principalPhone || item.school1?.phone;
-                            if (!pPhone) {
-                              toast.error(`رقم هاتف مدير ${item.team1Name} غير مسجل`);
-                              return;
-                            }
-                            openWhatsApp(pPhone, unifiedMsg);
-                          }}
-                          className="w-full bg-blue-600 hover:bg-blue-700 active:scale-95 text-white py-1.5 px-2 rounded-lg text-[10px] font-bold flex items-center justify-center gap-1 transition-all shadow-xs cursor-pointer truncate"
-                        >
-                          <Send className="w-2.5 h-2.5 shrink-0" />
-                          <span className="truncate">توجيه لمدير م.1</span>
-                        </button>
+                        {canSendNotifications ? (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const pPhone = item.school1?.principalPhone || item.school1?.phone;
+                              if (!pPhone) {
+                                toast.error(`رقم هاتف مدير ${item.team1Name} غير مسجل`);
+                                return;
+                              }
+                              openWhatsApp(pPhone, unifiedMsg);
+                            }}
+                            className="w-full bg-blue-600 hover:bg-blue-700 active:scale-95 text-white py-1.5 px-2 rounded-lg text-[10px] font-bold flex items-center justify-center gap-1 transition-all shadow-xs cursor-pointer truncate"
+                          >
+                            <Send className="w-2.5 h-2.5 shrink-0" />
+                            <span className="truncate">توجيه لمدير م.1</span>
+                          </button>
+                        ) : (
+                          <span className="text-[10px] text-slate-500 font-medium py-1">إدارات المؤسسات المعنية</span>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -1363,26 +1416,44 @@ export const DailyWhatsAppNotificationCenter: React.FC<DailyWhatsAppNotification
                             <Edit3 className="w-3.5 h-3.5" />
                           </button>
 
-                          {/* Direct WhatsApp Button */}
-                          <button
-                            type="button"
-                            onClick={() => {
-                              if (!stk.phone) {
-                                toast.error(`يرجى تسجيل رقم هاتف ${stk.name} أولاً عبر زر القلم`);
-                                return;
-                              }
-                              openWhatsApp(stk.phone, getUnifiedNotificationText(selectedMatchForBroadcast));
-                              setDispatchedIds((prev) => new Set(prev).add(stk.id));
-                            }}
-                            className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all shadow-xs cursor-pointer ${
-                              isDispatched
-                                ? 'bg-emerald-700 text-white'
-                                : 'bg-emerald-600 hover:bg-emerald-700 text-white'
-                            }`}
-                          >
-                            {isDispatched ? <CheckCircle2 className="w-3.5 h-3.5" /> : <Send className="w-3.5 h-3.5" />}
-                            <span>{isDispatched ? 'تم التوجيه ✓' : 'إرسال مباشر 💬'}</span>
-                          </button>
+                          {/* Direct WhatsApp Button (Restricted to Authorized Roles) */}
+                          {canSendNotifications ? (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (!stk.phone) {
+                                  toast.error(`يرجى تسجيل رقم هاتف ${stk.name} أولاً عبر زر القلم`);
+                                  return;
+                                }
+                                openWhatsApp(stk.phone, getUnifiedNotificationText(selectedMatchForBroadcast));
+                                setDispatchedIds((prev) => new Set(prev).add(stk.id));
+                              }}
+                              className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all shadow-xs cursor-pointer ${
+                                isDispatched
+                                  ? 'bg-emerald-700 text-white'
+                                  : 'bg-emerald-600 hover:bg-emerald-700 text-white'
+                              }`}
+                            >
+                              {isDispatched ? <CheckCircle2 className="w-3.5 h-3.5" /> : <Send className="w-3.5 h-3.5" />}
+                              <span>{isDispatched ? 'تم التوجيه ✓' : 'إرسال مباشر 💬'}</span>
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (stk.phone) {
+                                  navigator.clipboard.writeText(stk.phone);
+                                  toast.success(`تم نسخ هاتف ${stk.name}`);
+                                }
+                              }}
+                              disabled={!stk.phone}
+                              className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 disabled:opacity-50 text-slate-700 rounded-lg text-xs font-semibold flex items-center gap-1 transition-colors"
+                              title="نسخ رقم الهاتف"
+                            >
+                              <Copy className="w-3 h-3" />
+                              <span>نسخ الرقم</span>
+                            </button>
+                          )}
                         </div>
                       </div>
                     );
@@ -1394,18 +1465,35 @@ export const DailyWhatsAppNotificationCenter: React.FC<DailyWhatsAppNotification
             {/* Modal Footer: ONE-CLICK DISPATCH */}
             <div className="p-4 bg-slate-50 border-t border-slate-200 flex flex-col sm:flex-row items-center justify-between gap-3 shrink-0">
               <div className="text-xs text-slate-500 font-medium text-center sm:text-right">
-                {selectedMatchForBroadcast.stakeholders.filter((s: MatchStakeholder) => s.phone).length} أرقام جاهزة للبث المباشر
+                {canSendNotifications
+                  ? `${selectedMatchForBroadcast.stakeholders.filter((s: MatchStakeholder) => s.phone).length} أرقام جاهزة للبث المباشر`
+                  : 'صلاحية إرسال الإشعارات مقتصرة على رؤساء اللجن التقنية والمسؤول الإقليمي والمركز'}
               </div>
 
               <div className="flex items-center gap-2 w-full sm:w-auto">
-                <button
-                  type="button"
-                  onClick={() => handleOneClickUnifiedBroadcast(selectedMatchForBroadcast)}
-                  className="flex-1 sm:flex-none py-2.5 px-5 bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-700 hover:to-teal-800 active:scale-95 text-white font-black rounded-xl text-xs flex items-center justify-center gap-2 shadow-md transition-all cursor-pointer"
-                >
-                  <Zap className="w-4 h-4 fill-amber-300 text-amber-300" />
-                  <span>إرسال الإشعار لجميع المعنيين بنقرة واحدة ⚡</span>
-                </button>
+                {canSendNotifications ? (
+                  <button
+                    type="button"
+                    onClick={() => handleOneClickUnifiedBroadcast(selectedMatchForBroadcast)}
+                    className="flex-1 sm:flex-none py-2.5 px-5 bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-700 hover:to-teal-800 active:scale-95 text-white font-black rounded-xl text-xs flex items-center justify-center gap-2 shadow-md transition-all cursor-pointer"
+                  >
+                    <Zap className="w-4 h-4 fill-amber-300 text-amber-300" />
+                    <span>إرسال الإشعار لجميع المعنيين بنقرة واحدة ⚡</span>
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const text = getUnifiedNotificationText(selectedMatchForBroadcast);
+                      navigator.clipboard.writeText(text);
+                      toast.success('تم نسخ نص الإشعار الموحد للمباراة بنجاح!');
+                    }}
+                    className="flex-1 sm:flex-none py-2.5 px-4 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl text-xs flex items-center justify-center gap-2 transition-colors cursor-pointer"
+                  >
+                    <Copy className="w-4 h-4" />
+                    <span>نسخ نص الإشعار الموحد</span>
+                  </button>
+                )}
 
                 <button
                   type="button"
