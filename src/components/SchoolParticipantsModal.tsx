@@ -25,6 +25,7 @@ import {
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { ParticipationFormPdfModal } from './ParticipationFormPdfModal';
+import { useAuth } from '../contexts/AuthContext';
 
 interface SchoolParticipantsModalProps {
   isOpen: boolean;
@@ -43,9 +44,27 @@ export const SchoolParticipantsModal: React.FC<SchoolParticipantsModalProps> = (
 }) => {
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState<'tournaments' | 'students'>('tournaments');
+  const [selectedSportFilter, setSelectedSportFilter] = useState<string>(sportId || 'ALL');
   const [activeCategoryFilter, setActiveCategoryFilter] = useState<string>('ALL');
   const [tournaments, setTournaments] = useState<Tournament[]>([]);
   const [loadingTournaments, setLoadingTournaments] = useState(false);
+
+  const { userProfile } = useAuth();
+  const isTeacher = userProfile?.role === 'TEACHER';
+
+  const isUserBelongToSchool = useMemo(() => {
+    if (!school || !userProfile) return false;
+    if (!isTeacher) return true; // Admins / regional managers can manage
+    if (!userProfile.workLocation && !userProfile.schoolId) return false;
+    const cleanWorkLoc = (userProfile.workLocation || '').trim().toLowerCase();
+    const cleanSchoolName = (school.name || '').trim().toLowerCase();
+    return (
+      cleanSchoolName === cleanWorkLoc ||
+      cleanSchoolName.includes(cleanWorkLoc) ||
+      cleanWorkLoc.includes(cleanSchoolName) ||
+      (userProfile.schoolId && school.id === userProfile.schoolId)
+    );
+  }, [school, userProfile, isTeacher]);
 
   // PDF Modal state
   const [isPdfModalOpen, setIsPdfModalOpen] = useState(false);
@@ -58,13 +77,14 @@ export const SchoolParticipantsModal: React.FC<SchoolParticipantsModalProps> = (
 
   useEffect(() => {
     if (isOpen) {
+      setSelectedSportFilter(sportId || 'ALL');
       setLoadingTournaments(true);
       DataService.getTournaments()
         .then(tList => setTournaments(tList || []))
         .catch(err => console.error(err))
         .finally(() => setLoadingTournaments(false));
     }
-  }, [isOpen]);
+  }, [isOpen, sportId]);
 
   if (!isOpen || !school) return null;
 
@@ -74,16 +94,16 @@ export const SchoolParticipantsModal: React.FC<SchoolParticipantsModalProps> = (
   );
 
   // Filter by sport if a specific sport is selected
-  const sportStudents = sportId === 'ALL'
+  const sportStudents = selectedSportFilter === 'ALL'
     ? schoolStudents
-    : schoolStudents.filter(s => s.sportId === sportId);
+    : schoolStudents.filter(s => s.sportId === selectedSportFilter);
 
   // Filter by category if selected
   const displayedStudents = activeCategoryFilter === 'ALL'
     ? sportStudents
     : sportStudents.filter(s => s.category === activeCategoryFilter);
 
-  const sportInfo = sportId !== 'ALL' ? SPORTS_MAP[sportId] : null;
+  const sportInfo = selectedSportFilter !== 'ALL' ? SPORTS_MAP[selectedSportFilter] : null;
 
   const maleCount = sportStudents.filter(s => s.gender === 'Male').length;
   const femaleCount = sportStudents.filter(s => s.gender === 'Female').length;
@@ -132,7 +152,7 @@ export const SchoolParticipantsModal: React.FC<SchoolParticipantsModalProps> = (
           'رقم مسار': s.massarNumber || '---',
           'الجنس': s.gender === 'Male' ? 'ذكر' : 'أنثى',
           'تاريخ الازدياد': s.birthDate || 'غير محدد',
-          'الصفة الرياضية': s.affiliationType === 'club_affiliated' ? 'منتمي لنادي/عصبة' : 'غير منتمي (مدرسي فقط)',
+          'الصفة الرياضية': s.affiliationType === 'club_affiliated' ? 'منتمي لنادي/عصبة' : 'لا منتمي (مدرسي فقط)',
           'الفئة العمرية': catInfo ? catInfo.shortName : s.category || 'غير محدد',
           'الرياضة': sSport ? sSport.name : s.sportId,
           'نوع المشاركة / التخصص': s.athleticsSpecialty || (s.participationType === 'school_team' ? 'فريق المؤسسة' : 'فردي'),
@@ -167,6 +187,10 @@ export const SchoolParticipantsModal: React.FC<SchoolParticipantsModalProps> = (
   };
 
   const handleNavigateToManage = (sportIdToManage?: string) => {
+    if (isTeacher && !isUserBelongToSchool) {
+      toast.error('عذراً، لا يمكنك إضافة مشاركين أو تعديل فرق مؤسسة لا تنتمي إليها.');
+      return;
+    }
     onClose();
     const query = new URLSearchParams();
     const sId = sportIdToManage || (sportId !== 'ALL' ? sportId : '');
@@ -242,24 +266,6 @@ export const SchoolParticipantsModal: React.FC<SchoolParticipantsModalProps> = (
 
               {/* Action Buttons inside Header */}
               <div className="flex items-center gap-2 pt-1 sm:pt-0 self-start sm:self-center flex-wrap">
-                <button
-                  onClick={handleExportExcel}
-                  disabled={sportStudents.length === 0}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white/15 hover:bg-white/25 disabled:opacity-50 text-white text-xs font-bold transition-colors cursor-pointer"
-                  title="تصدير هذه اللائحة إلى إكسيل"
-                >
-                  <Download className="h-3.5 w-3.5" />
-                  <span>إكسيل</span>
-                </button>
-
-                <button
-                  onClick={handlePrint}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white/15 hover:bg-white/25 text-white text-xs font-bold transition-colors cursor-pointer"
-                  title="طباعة"
-                >
-                  <Printer className="h-3.5 w-3.5" />
-                  <span>طباعة</span>
-                </button>
               </div>
             </div>
           </div>
@@ -301,13 +307,36 @@ export const SchoolParticipantsModal: React.FC<SchoolParticipantsModalProps> = (
                   {schoolStudents.length}
                 </span>
               </div>
+
+              {/* Sport Filter Dropdown */}
+              <div className="flex items-center gap-1.5 bg-white px-2.5 py-1.5 rounded-xl border border-slate-300 shadow-3xs">
+                <span className="text-[11px] font-bold text-slate-500">تصفية بالرياضة:</span>
+                <select
+                  value={selectedSportFilter}
+                  onChange={(e) => setSelectedSportFilter(e.target.value)}
+                  className="text-xs font-black text-blue-900 bg-transparent border-none focus:ring-0 cursor-pointer"
+                >
+                  <option value="ALL">🌟 جميع الرياضات ({schoolStudents.length})</option>
+                  {Array.from(new Set(schoolStudents.map(s => s.sportId).filter(Boolean))).map((sId) => {
+                    const sIdStr = sId as string;
+                    const sObj = SPORTS_MAP[sIdStr] || { name: sIdStr, icon: '🏆' };
+                    const count = schoolStudents.filter(s => s.sportId === sIdStr).length;
+                    return (
+                      <option key={sIdStr} value={sIdStr}>
+                        {sObj.icon} {sObj.name} ({count})
+                      </option>
+                    );
+                  })}
+                </select>
+              </div>
+
               <div className="flex items-center gap-1.5 text-slate-600 font-medium">
                 <span>ذكور:</span>
-                <span className="font-bold text-blue-700">{schoolStudents.filter(s => s.gender === 'Male').length}</span>
+                <span className="font-bold text-blue-700">{sportStudents.filter(s => s.gender === 'Male').length}</span>
               </div>
               <div className="flex items-center gap-1.5 text-slate-600 font-medium">
                 <span>إناث:</span>
-                <span className="font-bold text-rose-600">{schoolStudents.filter(s => s.gender === 'Female').length}</span>
+                <span className="font-bold text-rose-600">{sportStudents.filter(s => s.gender === 'Female').length}</span>
               </div>
             </div>
 
@@ -378,7 +407,7 @@ export const SchoolParticipantsModal: React.FC<SchoolParticipantsModalProps> = (
 
                     schoolStudents.forEach(st => {
                       if (!st.category || !st.sportId) return;
-                      if (sportId !== 'ALL' && st.sportId !== sportId) return;
+                      if (selectedSportFilter !== 'ALL' && st.sportId !== selectedSportFilter) return;
 
                       const sId = st.sportId;
                       const cat = st.category;
@@ -470,7 +499,7 @@ export const SchoolParticipantsModal: React.FC<SchoolParticipantsModalProps> = (
                                         ? 'bg-amber-100 text-amber-900 border-amber-300'
                                         : 'bg-slate-100 text-slate-800 border-slate-300'
                                     }`}>
-                                      {isClubAffiliated ? '🟡 للمنتمين للأندية' : '⚪ لغير المنتمين للأندية'}
+                                      {isClubAffiliated ? '🟡 للمنتمين للأندية' : '⚪ لا منتمين'}
                                     </span>
                                   </div>
                                   <p className="text-[11px] text-slate-500 mt-0.5 font-medium">
@@ -500,6 +529,7 @@ export const SchoolParticipantsModal: React.FC<SchoolParticipantsModalProps> = (
                                       <th className="p-2.5">رقم مسار</th>
                                       <th className="p-2.5 text-center">الجنس</th>
                                       <th className="p-2.5 text-center">تاريخ الازدياد</th>
+                                      <th className="p-2.5 text-center">الانتماء الرياضي</th>
                                       <th className="p-2.5">التفاصيل / التخصص</th>
                                     </tr>
                                   </thead>
@@ -517,6 +547,15 @@ export const SchoolParticipantsModal: React.FC<SchoolParticipantsModalProps> = (
                                           </span>
                                         </td>
                                         <td className="p-2.5 text-center font-mono text-slate-600">{stud.birthDate || '—'}</td>
+                                        <td className="p-2.5 text-center">
+                                          <span className={`px-2 py-0.5 rounded border text-[10px] font-bold ${
+                                            stud.affiliationType === 'club_affiliated'
+                                              ? 'bg-amber-100 text-amber-950 border-amber-300'
+                                              : 'bg-slate-100 text-slate-700 border-slate-200'
+                                          }`}>
+                                            {stud.affiliationType === 'club_affiliated' ? 'منتمي لنادي' : 'لا منتمي'}
+                                          </span>
+                                        </td>
                                         <td className="p-2.5 text-slate-500 font-medium">
                                           {stud.athleticsSpecialty || (stud.participationType === 'school_team' ? 'فريق المؤسسة' : 'مشاركة فردية')}
                                         </td>
@@ -548,13 +587,15 @@ export const SchoolParticipantsModal: React.FC<SchoolParticipantsModalProps> = (
                                   <span>تحميل لائحة المشاركة (PDF)</span>
                                 </button>
 
-                                <button
-                                  onClick={() => handleNavigateToManage(group.sportId)}
-                                  className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-300 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer"
-                                >
-                                  <span>تعديل الفريق</span>
-                                  <ExternalLink className="w-3.5 h-3.5 shrink-0" />
-                                </button>
+                                {(!isTeacher || isUserBelongToSchool) && (
+                                  <button
+                                    onClick={() => handleNavigateToManage(group.sportId)}
+                                    className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-300 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                                  >
+                                    <span>تعديل الفريق</span>
+                                    <ExternalLink className="w-3.5 h-3.5 shrink-0" />
+                                  </button>
+                                )}
                               </div>
                             </div>
                           </div>
@@ -629,11 +670,13 @@ export const SchoolParticipantsModal: React.FC<SchoolParticipantsModalProps> = (
                               </span>
 
                               {/* Affiliation Badge */}
-                              {stud.affiliationType === 'club_affiliated' && (
-                                <span className="bg-amber-100 text-amber-950 font-bold px-2 py-0.5 rounded border border-amber-300">
-                                  🟡 منتمي لنادي
-                                </span>
-                              )}
+                              <span className={`px-2 py-0.5 rounded border font-bold ${
+                                stud.affiliationType === 'club_affiliated'
+                                  ? 'bg-amber-100 text-amber-950 border-amber-300'
+                                  : 'bg-slate-100 text-slate-700 border-slate-200'
+                              }`}>
+                                {stud.affiliationType === 'club_affiliated' ? '🟡 منتمي لنادي / عصبة' : '⚪ لا منتمي'}
+                              </span>
 
                               {/* Birth Date */}
                               {stud.birthDate && (
@@ -676,13 +719,15 @@ export const SchoolParticipantsModal: React.FC<SchoolParticipantsModalProps> = (
                     <p className="text-xs text-slate-400 mt-1">
                       يمكن للأستاذ المؤطر إضافة وتأكيد تسجيل التلاميذ عبر منصة فرق المؤسسة
                     </p>
-                    <button
-                      onClick={() => handleNavigateToManage()}
-                      className="mt-4 inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold shadow-xs transition-colors cursor-pointer"
-                    >
-                      <ExternalLink className="h-3.5 w-3.5" />
-                      <span>فتح صفحة تسجيل وتأطير الفرق</span>
-                    </button>
+                    {(!isTeacher || isUserBelongToSchool) && (
+                      <button
+                        onClick={() => handleNavigateToManage()}
+                        className="mt-4 inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold shadow-xs transition-colors cursor-pointer"
+                      >
+                        <ExternalLink className="h-3.5 w-3.5" />
+                        <span>فتح صفحة تسجيل وتأطير الفرق</span>
+                      </button>
+                    )}
                   </div>
                 )}
               </div>
@@ -696,13 +741,15 @@ export const SchoolParticipantsModal: React.FC<SchoolParticipantsModalProps> = (
             </span>
 
             <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
-              <button
-                onClick={() => handleNavigateToManage()}
-                className="flex-1 sm:flex-none inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-bold transition-colors cursor-pointer"
-              >
-                <ExternalLink className="h-3.5 w-3.5" />
-                <span>إدارة الفرق</span>
-              </button>
+              {(!isTeacher || isUserBelongToSchool) && (
+                <button
+                  onClick={() => handleNavigateToManage()}
+                  className="flex-1 sm:flex-none inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-bold transition-colors cursor-pointer"
+                >
+                  <ExternalLink className="h-3.5 w-3.5" />
+                  <span>إدارة الفرق</span>
+                </button>
+              )}
 
               <button
                 onClick={onClose}

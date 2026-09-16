@@ -15,6 +15,7 @@ interface RegisterStudentModalProps {
   schools: School[];
   registrationDeadline?: any;
   onRegistered: () => void;
+  preselectedSchoolName?: string;
 }
 
 export const RegisterStudentModal: React.FC<RegisterStudentModalProps> = ({
@@ -26,7 +27,8 @@ export const RegisterStudentModal: React.FC<RegisterStudentModalProps> = ({
   preselectedAffiliation,
   schools,
   registrationDeadline,
-  onRegistered
+  onRegistered,
+  preselectedSchoolName
 }) => {
   const { userProfile } = useAuth();
   
@@ -62,9 +64,22 @@ export const RegisterStudentModal: React.FC<RegisterStudentModalProps> = ({
     }
   }, [isOpen, preselectedCategory, preselectedGender, preselectedAffiliation]);
 
-  // Synchronize school auto-selection based on userProfile and schools list
+  // Synchronize school auto-selection based on preselectedSchoolName or userProfile and schools list
   useEffect(() => {
     if (isOpen) {
+      if (preselectedSchoolName) {
+        const match = schools.find(s => 
+          s.name && (
+            s.name.trim().toLowerCase() === preselectedSchoolName.trim().toLowerCase() ||
+            s.name.includes(preselectedSchoolName) ||
+            preselectedSchoolName.includes(s.name)
+          )
+        );
+        if (match) {
+          setSelectedSchoolId(match.id);
+          return;
+        }
+      }
       if (userProfile?.workLocation) {
         const match = schools.find(s => 
           s.name && (
@@ -82,7 +97,7 @@ export const RegisterStudentModal: React.FC<RegisterStudentModalProps> = ({
         setSelectedSchoolId('');
       }
     }
-  }, [isOpen, userProfile, schools]);
+  }, [isOpen, preselectedSchoolName, userProfile, schools]);
 
   const isExpired = useMemo(() => {
     if (!registrationDeadline) return false;
@@ -103,6 +118,33 @@ export const RegisterStudentModal: React.FC<RegisterStudentModalProps> = ({
   const availableCategories = (sport.ageCategories && sport.ageCategories.length > 0)
     ? sport.ageCategories
     : seasonalCategories.map(c => c.id);
+
+  const handleBirthDateChange = (newDate: string) => {
+    setBirthDate(newDate);
+    if (!newDate) return;
+
+    const parts = newDate.split('-');
+    const year = parseInt(parts[0], 10);
+    if (isNaN(year) || year < 1990 || year > 2030) return;
+
+    const match = currentSeason.match(/(\d{4})/);
+    const startYear = match ? parseInt(match[1], 10) : 2026;
+
+    let detectedCatId = '';
+    if (year >= startYear - 11) {
+      detectedCatId = 'U12';
+    } else if (year >= startYear - 14 && year <= startYear - 12) {
+      detectedCatId = 'U15';
+    } else if (year >= startYear - 17 && year <= startYear - 15) {
+      detectedCatId = 'U18';
+    } else {
+      detectedCatId = 'U20';
+    }
+
+    if (detectedCatId) {
+      setCategory(detectedCatId);
+    }
+  };
 
   const handlePhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -331,41 +373,90 @@ export const RegisterStudentModal: React.FC<RegisterStudentModalProps> = ({
           </div>
 
           {/* Gender & BirthDate */}
-          <div className="grid grid-cols-2 gap-3">
+          <div className="space-y-3">
             <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">
-                الجنس <span className="text-red-500">*</span>
+              <label className="block text-xs font-bold text-slate-700 mb-1.5 flex items-center justify-between">
+                <span>الجنس وتحديد الفئات المسموحة <span className="text-red-500">*</span></span>
+                <span className={`text-[10px] font-black px-2 py-0.5 rounded border ${
+                  gender === 'Male' ? 'bg-blue-50 text-blue-700 border-blue-200' : 'bg-pink-50 text-pink-700 border-pink-200'
+                }`}>
+                  {gender === 'Male' ? '👦 فئات الذكور (البراعم / الصغار / الفتيان / الشبان)' : '👧 فئات الإناث (البرعمات / الصغيرات / الفتيات / الشابات)'}
+                </span>
               </label>
-              <select
-                disabled={isExpired}
-                value={gender}
-                onChange={(e) => setGender(e.target.value as any)}
-                className="w-full text-xs rounded-xl border border-slate-200 px-3 py-2 text-slate-800 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-100"
-              >
-                <option value="Male">ذكر (👦)</option>
-                <option value="Female">أنثى (👧)</option>
-              </select>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  disabled={isExpired}
+                  onClick={() => setGender('Male')}
+                  className={`py-2 px-3 text-xs font-bold rounded-xl border transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                    gender === 'Male'
+                      ? 'bg-blue-50 border-blue-500 text-blue-700 shadow-2xs'
+                      : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-white'
+                  }`}
+                >
+                  <span>👦</span>
+                  <span>ذكر (فئات الذكور)</span>
+                </button>
+                <button
+                  type="button"
+                  disabled={isExpired}
+                  onClick={() => setGender('Female')}
+                  className={`py-2 px-3 text-xs font-bold rounded-xl border transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                    gender === 'Female'
+                      ? 'bg-pink-50 border-pink-500 text-pink-700 shadow-2xs'
+                      : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-white'
+                  }`}
+                >
+                  <span>👧</span>
+                  <span>أنثى (فئات الإناث)</span>
+                </button>
+              </div>
             </div>
 
             <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">
-                تاريخ الازدياد <span className="text-red-500">*</span>
-              </label>
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="block text-xs font-bold text-slate-700">
+                  تاريخ الازدياد <span className="text-red-500">*</span>
+                </label>
+                <span className="text-[10px] text-blue-600 font-bold bg-blue-50 px-2 py-0.5 rounded border border-blue-200">
+                  إحالة مباشرة للفئة
+                </span>
+              </div>
               <input
                 type="date"
                 disabled={isExpired}
                 value={birthDate}
-                onChange={(e) => setBirthDate(e.target.value)}
-                className="w-full text-xs rounded-xl border border-slate-200 px-3 py-2 text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-100"
+                onChange={(e) => handleBirthDateChange(e.target.value)}
+                className="w-full text-xs rounded-xl border border-slate-200 px-3 py-2.5 text-slate-800 bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-100 font-mono"
               />
+              {birthDate && category && (
+                <div className={`mt-1.5 flex items-center gap-1.5 text-[11px] font-bold px-2.5 py-1.5 rounded-lg border ${
+                  gender === 'Male'
+                    ? 'text-blue-800 bg-blue-50/90 border-blue-200'
+                    : 'text-pink-800 bg-pink-50/90 border-pink-200'
+                }`}>
+                  <span className={gender === 'Male' ? 'text-blue-600' : 'text-pink-600'}>✓</span>
+                  <span>
+                    تمت إحالة {gender === 'Male' ? 'التلميذ مباشرة لفئة' : 'التلميذة مباشرة لفئة'}:{' '}
+                    <strong className="underline">{getCategoryGenderLabel(category, gender, currentSeason)}</strong>
+                  </span>
+                </div>
+              )}
             </div>
           </div>
 
           {/* Category selection */}
           <div>
-            <label className="block text-xs font-bold text-slate-700 mb-1">
-              الفئة العمرية الرياضية <span className="text-red-500">*</span>
-            </label>
+            <div className="flex items-center justify-between mb-1.5">
+              <label className="block text-xs font-bold text-slate-700">
+                الفئة العمرية الرياضية ({gender === 'Male' ? 'فئات الذكور فقط' : 'فئات الإناث فقط'}) <span className="text-red-500">*</span>
+              </label>
+              <span className={`text-[10px] font-bold px-2 py-0.5 rounded border ${
+                gender === 'Male' ? 'bg-blue-50 text-blue-700 border-blue-200' : 'bg-pink-50 text-pink-700 border-pink-200'
+              }`}>
+                {gender === 'Male' ? 'فئات الذكور' : 'فئات الإناث'}
+              </span>
+            </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
               {availableCategories.map(catId => {
                 const isSelected = category === catId;
@@ -377,7 +468,9 @@ export const RegisterStudentModal: React.FC<RegisterStudentModalProps> = ({
                     onClick={() => setCategory(catId)}
                     className={`px-3 py-2.5 rounded-xl text-xs font-bold border transition-all cursor-pointer text-center ${
                       isSelected
-                        ? 'bg-blue-600 text-white border-blue-600 shadow-xs'
+                        ? gender === 'Male'
+                          ? 'bg-blue-600 text-white border-blue-600 shadow-xs ring-2 ring-blue-300'
+                          : 'bg-pink-600 text-white border-pink-600 shadow-xs ring-2 ring-pink-300'
                         : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
                     }`}
                   >
@@ -464,7 +557,7 @@ export const RegisterStudentModal: React.FC<RegisterStudentModalProps> = ({
                       : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
                   }`}
                 >
-                  ⚪ غير منتمي لنادي (مدرسي فقط)
+                  ⚪ لا منتمي (مدرسي فقط)
                 </button>
                 <button
                   type="button"

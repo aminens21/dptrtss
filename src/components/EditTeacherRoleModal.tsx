@@ -16,7 +16,8 @@ import {
   Save,
   GraduationCap,
   LogIn,
-  Trash2
+  Trash2,
+  Search
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
@@ -56,6 +57,8 @@ export const EditTeacherRoleModal: React.FC<EditTeacherRoleModalProps> = ({
   );
   const [workLocation, setWorkLocation] = useState<string>(teacher?.workLocation || '');
   const [leaseNumber, setLeaseNumber] = useState<string>(teacher?.leaseNumber || '');
+  const [schoolSearch, setSchoolSearch] = useState<string>('');
+  const [schoolTypeFilter, setSchoolTypeFilter] = useState<'ALL' | 'تأهيلي' | 'إعدادي' | 'ابتدائي'>('ALL');
   const [allSportsList, setAllSportsList] = useState<Array<{ id: string; name: string; icon: string }>>([]);
   const [saving, setSaving] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -102,6 +105,8 @@ export const EditTeacherRoleModal: React.FC<EditTeacherRoleModalProps> = ({
       );
       setWorkLocation(teacher.workLocation || '');
       setLeaseNumber(teacher.leaseNumber || '');
+      setSchoolSearch('');
+      setSchoolTypeFilter('ALL');
       setShowDeleteConfirm(false);
     }
   }, [teacher, isOpen]);
@@ -406,9 +411,9 @@ export const EditTeacherRoleModal: React.FC<EditTeacherRoleModalProps> = ({
                 onChange={(e) => setRole(e.target.value as any)}
                 className="w-full text-xs px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-blue-500 font-bold text-slate-800 cursor-pointer"
               >
-                <option value="TEACHER">أستاذ مؤطر للتربية البدنية والرياضية (TEACHER)</option>
-                <option value="SPORT_MANAGER">مسير رياضي منسق للتخصصات (SPORT_MANAGER)</option>
-                <option value="CENTRAL_ADMIN">مسؤول مركزي بالمديرية (CENTRAL_ADMIN)</option>
+                <option value="TEACHER">أستاذ مؤطر (TEACHER)</option>
+                <option value="SPORT_MANAGER">منسق مادة التربية البدنية بالمؤسسة (SPORT_MANAGER)</option>
+                <option value="CENTRAL_ADMIN">مسير إقليمي (CENTRAL_ADMIN)</option>
               </select>
             </div>
 
@@ -572,18 +577,109 @@ export const EditTeacherRoleModal: React.FC<EditTeacherRoleModalProps> = ({
                   مقر العمل (المؤسسة التعليمية):
                 </label>
                 {schools.length > 0 ? (
-                  <select
-                    value={workLocation}
-                    onChange={(e) => setWorkLocation(e.target.value)}
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-blue-500 font-bold"
-                  >
-                    <option value="">اختر المؤسسة التعليمية...</option>
-                    {schools.map(sch => (
-                      <option key={sch.id} value={sch.name}>
-                        {sch.name} ({sch.type})
-                      </option>
-                    ))}
-                  </select>
+                  <div className="space-y-2">
+                    {/* Search and Cycle Filtering Section */}
+                    <div className="space-y-1.5 p-2 bg-slate-50 border border-slate-200 rounded-xl">
+                      {/* Search Input */}
+                      <div className="relative">
+                        <Search className="h-3.5 w-3.5 absolute right-2.5 top-2 text-slate-400 pointer-events-none" />
+                        <input
+                          type="text"
+                          placeholder="ابحث باسم المؤسسة..."
+                          value={schoolSearch}
+                          onChange={(e) => setSchoolSearch(e.target.value)}
+                          className="w-full pr-8 pl-3 py-1 bg-white border border-slate-200 rounded-lg text-[11px] font-bold focus:outline-hidden focus:ring-1 focus:ring-blue-500"
+                        />
+                      </div>
+
+                      {/* Cycle Filter Buttons (الأسلاك التعليمية) */}
+                      <div className="flex flex-wrap gap-1" dir="rtl">
+                        <button
+                          type="button"
+                          onClick={() => setSchoolTypeFilter('ALL')}
+                          className={`px-2 py-0.5 rounded-md text-[10px] font-bold transition-all border cursor-pointer ${
+                            schoolTypeFilter === 'ALL'
+                              ? 'bg-blue-600 text-white border-blue-600 shadow-3xs'
+                              : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+                          }`}
+                        >
+                          الكل ({schools.length})
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setSchoolTypeFilter('تأهيلي')}
+                          className={`px-2 py-0.5 rounded-md text-[10px] font-bold transition-all border cursor-pointer ${
+                            schoolTypeFilter === 'تأهيلي'
+                              ? 'bg-blue-600 text-white border-blue-600 shadow-3xs'
+                              : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+                          }`}
+                        >
+                          تأهيلي ({schools.filter(s => s.type === 'تأهيلي').length})
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setSchoolTypeFilter('إعدادي')}
+                          className={`px-2 py-0.5 rounded-md text-[10px] font-bold transition-all border cursor-pointer ${
+                            schoolTypeFilter === 'إعدادي'
+                              ? 'bg-blue-600 text-white border-blue-600 shadow-3xs'
+                              : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+                          }`}
+                        >
+                          إعدادي ({schools.filter(s => s.type === 'إعدادي').length})
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setSchoolTypeFilter('ابتدائي')}
+                          className={`px-2 py-0.5 rounded-md text-[10px] font-bold transition-all border cursor-pointer ${
+                            schoolTypeFilter === 'ابتدائي'
+                              ? 'bg-blue-600 text-white border-blue-600 shadow-3xs'
+                              : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+                          }`}
+                        >
+                          ابتدائي ({schools.filter(s => s.type === 'ابتدائي').length})
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Filtered Dropdown List */}
+                    <select
+                      value={workLocation}
+                      onChange={(e) => setWorkLocation(e.target.value)}
+                      className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-blue-500 font-bold"
+                    >
+                      <option value="">اختر المؤسسة التعليمية...</option>
+                      
+                      {/* Edge case: If the current location is filtered out, preserve it explicitly */}
+                      {(() => {
+                        const filtered = schools.filter(sch => {
+                          const matchesType = schoolTypeFilter === 'ALL' || sch.type === schoolTypeFilter;
+                          const matchesSearch = schoolSearch.trim() === '' || 
+                            sch.name.toLowerCase().includes(schoolSearch.toLowerCase()) ||
+                            (sch.commune && sch.commune.toLowerCase().includes(schoolSearch.toLowerCase()));
+                          return matchesType && matchesSearch;
+                        });
+
+                        const currentSchoolObj = schools.find(sch => sch.name === workLocation);
+                        const showCurrentLocationOption = workLocation && currentSchoolObj && !filtered.some(sch => sch.id === currentSchoolObj.id);
+
+                        return (
+                          <>
+                            {showCurrentLocationOption && currentSchoolObj && (
+                              <option key={`current-${currentSchoolObj.id}`} value={currentSchoolObj.name} className="bg-amber-50 font-black">
+                                📌 {currentSchoolObj.name} ({currentSchoolObj.type === 'تأهيلي' ? 'ثانوي تأهيلي' : currentSchoolObj.type === 'إعدادي' ? 'ثانوي إعدادي' : 'ابتدائي'}) [مقر العمل الحالي]
+                              </option>
+                            )}
+
+                            {filtered.map(sch => (
+                              <option key={sch.id} value={sch.name}>
+                                {sch.name} ({sch.type === 'تأهيلي' ? 'ثانوي تأهيلي' : sch.type === 'إعدادي' ? 'ثانوي إعدادي' : 'ابتدائي'})
+                              </option>
+                            ))}
+                          </>
+                        );
+                      })()}
+                    </select>
+                  </div>
                 ) : (
                   <div className="p-2.5 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-800">
                     لم يتم إدراج أي مؤسسات تعليمية في هذه المديرية بعد. يرجى إضافة المؤسسات من تبويب المؤسسات التعليمية أولاً.

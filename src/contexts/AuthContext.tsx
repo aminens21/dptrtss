@@ -22,7 +22,7 @@ interface AuthContextType {
   assignUserDirectorate: (directorateId: string, directorateName: string) => Promise<void>;
 }
 
-export const CENTRAL_ADMIN_EMAIL = 'printomrdesigne@gmail.com';
+export const CENTRAL_ADMIN_EMAIL = 'aminens21@gmail.com';
 
 export const isSuperAdminEmail = (email?: string): boolean => {
   if (!email) return false;
@@ -31,8 +31,8 @@ export const isSuperAdminEmail = (email?: string): boolean => {
 
 const DEMO_PROFILES: Record<Role, { name: string; email: string; sportId?: string; workLocation?: string; leaseNumber?: string; directorateId?: string; directorateName?: string }> = {
   CENTRAL_ADMIN: {
-    name: 'المسير المركزي الرئيسي (المشرف العام)',
-    email: 'printomrdesigne@gmail.com',
+    name: 'المسؤول المركزي (المشرف العام)',
+    email: 'aminens21@gmail.com',
     directorateId: 'taourirt',
     directorateName: 'المديرية الإقليمية بتاوريرت'
   },
@@ -277,7 +277,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const loginAsDemo = (role: Role, customName?: string, customEmail?: string, sportId?: string, assignedTournamentId?: string, extraFields?: Partial<User>) => {
     const defaultInfo = DEMO_PROFILES[role] || DEMO_PROFILES.CENTRAL_ADMIN;
     const targetEmail = (customEmail || defaultInfo.email).trim().toLowerCase();
-    const isSuper = isSuperAdminEmail(targetEmail) || (role === 'CENTRAL_ADMIN' && targetEmail === 'printomrdesigne@gmail.com');
+    const isSuper = isSuperAdminEmail(targetEmail) || (role === 'CENTRAL_ADMIN' && (targetEmail === 'aminens21@gmail.com' || targetEmail === 'omrhaman.figuig@gmail.com'));
 
     const demoProfile: User = {
       id: `demo-${role.toLowerCase()}`,

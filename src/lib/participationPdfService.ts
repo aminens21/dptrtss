@@ -55,8 +55,8 @@ export function generateParticipationFormHtml(options: ParticipationPdfOptions):
       const massar = student.massarNumber || '—';
       const cat = student.category || '';
       const affiliationLabel = student.affiliationType === 'club_affiliated' 
-        ? 'للمنتمين للأندية' 
-        : 'لغير المنتمين للأندية';
+        ? 'منتمي لنادي' 
+        : 'لا منتمي';
       const photoHtml = student.photoUrl
         ? `<img src="${student.photoUrl}" style="width: 32px; height: 38px; object-fit: cover; border-radius: 3px; border: 1px solid #94a3b8; display: block; margin: 0 auto;" />`
         : `<div style="width: 32px; height: 38px; border: 1px dashed #cbd5e1; border-radius: 3px; margin: 0 auto; display: flex; align-items: center; justify-content: center; font-size: 8px; color: #94a3b8;">صورة</div>`;

@@ -70,6 +70,7 @@ export const TeacherTeams: React.FC = () => {
   const [gender, setGender] = useState<'Male' | 'Female'>('Male');
   const [birthDate, setBirthDate] = useState('');
   const [category, setCategory] = useState('');
+  const [affiliationType, setAffiliationType] = useState<'non_club' | 'club_affiliated'>('non_club');
   const [participationType, setParticipationType] = useState<'individual' | 'school_team'>('individual');
   const [athleticsSpecialty, setAthleticsSpecialty] = useState('');
   const [photo, setPhoto] = useState<string>('');
@@ -78,6 +79,9 @@ export const TeacherTeams: React.FC = () => {
   const [coachPhone, setCoachPhone] = useState('');
   const [uploading, setUploading] = useState(false);
   const [studentToDeleteId, setStudentToDeleteId] = useState<string | null>(null);
+
+  // Category Selection for Drill-down student view (catId_gender)
+  const [selectedCategoryKey, setSelectedCategoryKey] = useState<string | null>(null);
 
   // Category Coaches states
   const [predefinedCoaches, setPredefinedCoaches] = useState<Record<string, { coachName: string; coachLeaseNumber: string; coachPhone: string }>>({});
@@ -90,6 +94,7 @@ export const TeacherTeams: React.FC = () => {
   const [isPdfModalOpen, setIsPdfModalOpen] = useState(false);
   const [activeDirectorateObj, setActiveDirectorateObj] = useState<Directorate | null>(null);
   const [showOnlyParticipatingCoaches, setShowOnlyParticipatingCoaches] = useState(true);
+  const [rosterGenderFilter, setRosterGenderFilter] = useState<'ALL' | 'Male' | 'Female'>('ALL');
 
   // Verification: Teacher profile completeness
   const isTeacher = userProfile?.role === 'TEACHER';
@@ -203,6 +208,7 @@ export const TeacherTeams: React.FC = () => {
 
   const handleSelectSport = (sportId: string) => {
     setSelectedSportId(sportId);
+    setSelectedCategoryKey(null);
     
     // Automatically pre-select first active category of this sport if any
     const sport = sportsConfig.find(s => s.id === sportId);
@@ -307,7 +313,7 @@ export const TeacherTeams: React.FC = () => {
     return tournaments.find(t => t.sportId === sportId);
   };
 
-  const handleOpenNewStudentForm = () => {
+  const handleOpenNewStudentForm = (initialCat?: string, initialGender?: 'Male' | 'Female', initialAffiliation?: 'non_club' | 'club_affiliated') => {
     if (!selectedSportId) return;
 
     const selectedSportObj = sportsConfig.find(s => s.id === selectedSportId);
@@ -334,6 +340,20 @@ export const TeacherTeams: React.FC = () => {
     setBirthDate('');
     setPhoto('');
     setAthleticsSpecialty('');
+    if (initialAffiliation) {
+      setAffiliationType(initialAffiliation);
+    } else if (initialCat && initialGender) {
+      const sportTourns = tournaments.filter(t => t.sportId === selectedSportId);
+      const matchingTourn = sportTourns.find(t => normalizeCategoryKey(t.ageCategory || '') === initialCat && (t.gender === initialGender || t.gender === 'Both' || !t.gender));
+      const tournIsClub = matchingTourn ? isClubTournament(matchingTourn) : sportTourns.some(t => isClubTournament(t));
+      setAffiliationType(tournIsClub ? 'club_affiliated' : 'non_club');
+    } else {
+      setAffiliationType(isClubTournament(getSportTournament(selectedSportId)) ? 'club_affiliated' : 'non_club');
+    }
+    
+    if (initialGender) {
+      setGender(initialGender);
+    }
     
     // Default the coach fields to current user profile
     setCoachName(userProfile?.fullName || '');
@@ -359,14 +379,19 @@ export const TeacherTeams: React.FC = () => {
       setSelectedSchoolId(schools[0].id);
     }
     
-    const sport = sportsConfig.find(s => s.id === selectedSportId);
-    if (sport && sport.ageCategories && sport.ageCategories.length > 0) {
-      setCategory(sport.ageCategories[0]);
+    if (initialCat) {
+      setCategory(initialCat);
     } else {
-      setCategory('');
+      const sport = sportsConfig.find(s => s.id === selectedSportId);
+      if (sport && sport.ageCategories && sport.ageCategories.length > 0) {
+        setCategory(sport.ageCategories[0]);
+      } else {
+        setCategory('');
+      }
     }
     
     setIsFormOpen(true);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   const canTeacherManageStudent = (student: Student) => {
@@ -420,6 +445,11 @@ export const TeacherTeams: React.FC = () => {
     if (student.participationType) {
       setParticipationType(student.participationType);
     }
+    if (student.affiliationType) {
+      setAffiliationType(student.affiliationType);
+    } else {
+      setAffiliationType('non_club');
+    }
     setPhoto(student.photoUrl || '');
     if (student.athleticsSpecialty) {
       setAthleticsSpecialty(student.athleticsSpecialty);
@@ -433,6 +463,7 @@ export const TeacherTeams: React.FC = () => {
     setCoachPhone(student.coachPhone || userProfile?.phone || '');
     
     setIsFormOpen(true);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   const handleBirthDateChange = (newDate: string) => {
@@ -582,6 +613,7 @@ export const TeacherTeams: React.FC = () => {
           gender,
           birthDate,
           category,
+          affiliationType,
           schoolId: resolvedSchoolId,
           schoolName: resolvedSchoolName,
           photoUrl: photo || undefined,
@@ -608,6 +640,7 @@ export const TeacherTeams: React.FC = () => {
           gender,
           birthDate,
           category,
+          affiliationType,
           schoolId: resolvedSchoolId,
           schoolName: resolvedSchoolName,
           sportId: selectedSportId,
@@ -675,11 +708,25 @@ export const TeacherTeams: React.FC = () => {
   const getSportIcon = (id: string) => SPORTS_MAP[id]?.icon || '🏆';
   
   const getCategoryLabel = (catId: string, gender?: string) => {
-    return getCategoryGenderLabel(catId, gender);
+    return getCategoryGenderLabel(catId, gender, currentSeason);
   };
 
   // Filter students for the currently selected sport
   const activeSportStudents = students.filter(s => s.sportId === selectedSportId);
+
+  // Filter by selected category card drill-down (if selected) or gender
+  const displayedSportStudents = useMemo(() => {
+    return activeSportStudents.filter(s => {
+      if (selectedCategoryKey) {
+        const [catId, g] = selectedCategoryKey.split('_');
+        if (s.category !== catId || s.gender !== g) return false;
+      } else {
+        // If no category card is selected, do not display any student list
+        return false;
+      }
+      return true;
+    });
+  }, [activeSportStudents, selectedCategoryKey]);
 
   const effectiveCoaches = useMemo(() => {
     const coaches: Record<string, { coachName: string; coachLeaseNumber: string; coachPhone: string }> = {};
@@ -770,17 +817,21 @@ export const TeacherTeams: React.FC = () => {
     const sportTourns = tournaments.filter(t => t.sportId === sport.id);
     const mainTourn = sportTourns.length > 0 ? sportTourns[0] : null;
     
+    const hasClubTournaments = sportTourns.some(t => isClubTournament(t));
+    const hasSchoolOnlyTournaments = sportTourns.some(t => !isClubTournament(t));
+    const hasBothClasses = hasClubTournaments && hasSchoolOnlyTournaments;
+
     const sportStudents = students.filter(s => s.sportId === sport.id);
     const isClub = sportStudents.length > 0 
       ? sportStudents.some(s => s.affiliationType === 'club_affiliated')
-      : isClubTournament(mainTourn);
+      : (isClubTournament(mainTourn) && !hasBothClasses);
 
     return (
       <div
         key={sport.id}
         onClick={() => handleSelectSport(sport.id)}
         className={`rounded-2xl border p-5 transition-all cursor-pointer flex flex-col justify-between h-52 group relative overflow-hidden shadow-xs ${
-          isClub
+          isClub && !hasBothClasses
             ? 'bg-amber-50/90 border-amber-300 hover:border-amber-500 hover:shadow-md'
             : 'bg-white border-slate-200/90 hover:border-blue-400 hover:shadow-md'
         }`}
@@ -791,13 +842,22 @@ export const TeacherTeams: React.FC = () => {
           <div className="flex items-center justify-between gap-1 flex-wrap">
             <span className="text-3xl block">{mapped.icon}</span>
             <div className="flex items-center gap-1">
-              {isClub ? (
+              {hasBothClasses ? (
+                <div className="flex items-center gap-1 flex-wrap justify-end">
+                  <span className="text-[9px] font-extrabold px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-950 border border-amber-300 shadow-3xs">
+                    🟡 للمنتمين للأندية
+                  </span>
+                  <span className="text-[9px] font-extrabold px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-800 border border-slate-300 shadow-3xs">
+                    ⚪ لا منتمين
+                  </span>
+                </div>
+              ) : isClub ? (
                 <span className="text-[9px] font-extrabold px-2 py-0.5 rounded-full bg-amber-200 text-amber-950 border border-amber-400 shadow-3xs">
                   🟡 للمنتمين للأندية
                 </span>
               ) : (
                 <span className="text-[9px] font-extrabold px-2 py-0.5 rounded-full bg-slate-100 text-slate-800 border border-slate-300 shadow-3xs">
-                  ⚪ لغير المنتمين (العموميون)
+                  ⚪ لا منتمين (العموميون)
                 </span>
               )}
               {isProgrammed && (
@@ -1163,8 +1223,13 @@ export const TeacherTeams: React.FC = () => {
 
                   {/* Gender */}
                   <div>
-                    <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                      الجنس *
+                    <label className="block text-xs font-bold text-slate-700 mb-1.5 flex items-center justify-between">
+                      <span>الجنس *</span>
+                      <span className={`text-[10px] font-black px-2 py-0.5 rounded border ${
+                        gender === 'Male' ? 'bg-blue-50 text-blue-700 border-blue-200' : 'bg-pink-50 text-pink-700 border-pink-200'
+                      }`}>
+                        {gender === 'Male' ? '👦 فئات الذكور (البراعم / الصغار / الفتيان / الشبان)' : '👧 فئات الإناث (البرعمات / الصغيرات / الفتيات / الشابات)'}
+                      </span>
                     </label>
                     <div className="grid grid-cols-2 gap-2">
                       <button
@@ -1172,24 +1237,24 @@ export const TeacherTeams: React.FC = () => {
                         onClick={() => setGender('Male')}
                         className={`py-2 px-3 text-xs font-bold rounded-xl border transition-all flex items-center justify-center gap-2 cursor-pointer ${
                           gender === 'Male'
-                            ? 'bg-blue-50 border-blue-500 text-blue-700 shadow-3xs'
+                            ? 'bg-blue-50 border-blue-500 text-blue-700 shadow-3xs ring-1 ring-blue-400'
                             : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-white'
                         }`}
                       >
                         <span>👦</span>
-                        <span>ذكر</span>
+                        <span>ذكر (فئات الذكور)</span>
                       </button>
                       <button
                         type="button"
                         onClick={() => setGender('Female')}
                         className={`py-2 px-3 text-xs font-bold rounded-xl border transition-all flex items-center justify-center gap-2 cursor-pointer ${
                           gender === 'Female'
-                            ? 'bg-pink-50 border-pink-500 text-pink-700 shadow-3xs'
+                            ? 'bg-pink-50 border-pink-500 text-pink-700 shadow-3xs ring-1 ring-pink-400'
                             : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-white'
                         }`}
                       >
                         <span>👧</span>
-                        <span>أنثى</span>
+                        <span>أنثى (فئات الإناث)</span>
                       </button>
                     </div>
                   </div>
@@ -1212,18 +1277,32 @@ export const TeacherTeams: React.FC = () => {
                       onChange={(e) => handleBirthDateChange(e.target.value)}
                     />
                     {birthDate && category && (
-                      <div className="mt-1.5 flex items-center gap-1.5 text-[11px] font-bold text-emerald-800 bg-emerald-50/90 px-2.5 py-1 rounded-lg border border-emerald-200">
-                        <span className="text-emerald-600 text-xs">✓</span>
-                        <span>تمت إحالة التلميذ(ة) تلقائياً لفئة: <strong className="underline">{getCategoryLabel(category)}</strong></span>
+                      <div className={`mt-1.5 flex items-center gap-1.5 text-[11px] font-bold px-2.5 py-1.5 rounded-lg border ${
+                        gender === 'Male'
+                          ? 'text-blue-800 bg-blue-50/90 border-blue-200'
+                          : 'text-pink-800 bg-pink-50/90 border-pink-200'
+                      }`}>
+                        <span className={gender === 'Male' ? 'text-blue-600' : 'text-pink-600'}>✓</span>
+                        <span>
+                          تمت إحالة {gender === 'Male' ? 'التلميذ مباشرة إلى فئة' : 'التلميذة مباشرة إلى فئة'}:{' '}
+                          <strong className="underline">{getCategoryLabel(category, gender)}</strong>
+                        </span>
                       </div>
                     )}
                   </div>
 
                   {/* Category Selection */}
                   <div>
-                    <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                      الفئة الرياضية المعنية *
-                    </label>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <label className="block text-xs font-bold text-slate-700">
+                        الفئة الرياضية المعنية ({gender === 'Male' ? 'فئات الذكور فقط' : 'فئات الإناث فقط'}) *
+                      </label>
+                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded border ${
+                        gender === 'Male' ? 'bg-blue-50 text-blue-700 border-blue-200' : 'bg-pink-50 text-pink-700 border-pink-200'
+                      }`}>
+                        {gender === 'Male' ? 'فئات الذكور' : 'فئات الإناث'}
+                      </span>
+                    </div>
                     <select
                       required
                       className="w-full text-xs px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all font-semibold text-slate-700"
@@ -1232,7 +1311,7 @@ export const TeacherTeams: React.FC = () => {
                     >
                       {activeSportCategories.map((catId) => (
                         <option key={catId} value={catId}>
-                          {getCategoryLabel(catId)}
+                          {getCategoryLabel(catId, gender)}
                         </option>
                       ))}
                     </select>
@@ -1307,6 +1386,39 @@ export const TeacherTeams: React.FC = () => {
                       </div>
                     </>
                   )}
+
+                  {/* Affiliation Type: non_club vs club_affiliated */}
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                      صفة الانتماء الرياضي للتلميذ(ة) *
+                    </label>
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setAffiliationType('non_club')}
+                        className={`py-2 px-3 text-xs font-bold rounded-xl border transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                          affiliationType === 'non_club'
+                            ? 'bg-slate-900 text-white border-slate-900 shadow-3xs'
+                            : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                        }`}
+                      >
+                        <span>⚪</span>
+                        <span>لا منتمي (مدرسي فقط)</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setAffiliationType('club_affiliated')}
+                        className={`py-2 px-3 text-xs font-bold rounded-xl border transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                          affiliationType === 'club_affiliated'
+                            ? 'bg-amber-400 text-amber-950 font-extrabold border-amber-500 shadow-3xs ring-2 ring-amber-300'
+                            : 'bg-amber-50 text-amber-900 border-amber-200 hover:bg-amber-100'
+                        }`}
+                      >
+                        <span>🟡</span>
+                        <span>منتمي لنادي / عصبة</span>
+                      </button>
+                    </div>
+                  </div>
 
                   {/* Photo Upload */}
                   <div className="md:col-span-2">
@@ -1398,23 +1510,17 @@ export const TeacherTeams: React.FC = () => {
                     <span>الأساتذة المؤطرون حسب فئات وصنوف الفريق</span>
                   </h4>
                   <p className="text-[11px] text-slate-500 mt-0.5">
-                    قم بتعيين الأستاذ المؤطر لكل فئة عمرية وجنس. سيتم تطبيق هذه المعلومات تلقائياً على جميع التلاميذ المسجلين في هذه الفئة بمطبوع المشاركة الرسمي.
+                    انقر على بطاقة الفئة أدناه للدخول إليها وتصفح تلاميذها. قم بتعيين الأستاذ المؤطر لكل فئة لتطبيق بياناته تلقائياً بمطبوع المشاركة.
                   </p>
                 </div>
 
-                {/* Checkbox Toggle to show only participating categories */}
+                {/* Active Categories Indicator */}
                 {activeSportStudents.length > 0 && (
-                  <label className="flex items-center gap-2 text-xs font-bold text-blue-800 bg-blue-50 hover:bg-blue-100 px-3 py-1.5 rounded-xl border border-blue-200 cursor-pointer shrink-0 select-none transition-colors">
-                    <input
-                      type="checkbox"
-                      checked={showOnlyParticipatingCoaches}
-                      onChange={(e) => setShowOnlyParticipatingCoaches(e.target.checked)}
-                      className="rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer h-4 w-4"
-                    />
-                    <span>إظهار الفئات المشارك فيها فقط ({
+                  <span className="text-[10px] font-bold text-amber-800 bg-amber-50 px-3 py-1.5 rounded-xl border border-amber-200 shrink-0 select-none">
+                    ⭐ الفئات المشارك فيها فقط ({
                       Array.from(new Set(activeSportStudents.map(s => `${s.category}_${s.gender}`))).length
-                    })</span>
-                  </label>
+                    })
+                  </span>
                 )}
               </div>
 
@@ -1425,7 +1531,7 @@ export const TeacherTeams: React.FC = () => {
                     { catId, gender: 'Female' as const, label: getCategoryLabel(catId, 'Female') }
                   ]);
                   
-                  const filteredItems = showOnlyParticipatingCoaches && activeSportStudents.length > 0
+                  const filteredItems = activeSportStudents.length > 0
                     ? allItems.filter(item => 
                         activeSportStudents.some(s => s.category === item.catId && s.gender === item.gender)
                       )
@@ -1439,33 +1545,112 @@ export const TeacherTeams: React.FC = () => {
                     coachLeaseNumber: userProfile?.leaseNumber || '',
                     coachPhone: userProfile?.phone || ''
                   };
+                  const matchingStudents = activeSportStudents.filter(s => s.category === catId && s.gender === g);
                   const isEditing = editingCoachKey === key;
+                  const isSelected = selectedCategoryKey === key;
+                  const isCategoryClub = matchingStudents.some(s => s.affiliationType === 'club_affiliated');
+
+                  const cardStyle = isCategoryClub
+                    ? `${isSelected ? 'bg-amber-100/90 border-amber-500 ring-2 ring-amber-400 shadow-md scale-[1.01]' : 'bg-amber-50 border-amber-300 hover:bg-amber-100/40 hover:border-amber-400 hover:shadow-sm shadow-3xs'}`
+                    : `${isSelected ? 'bg-slate-50 border-blue-500 ring-2 ring-blue-300 shadow-md scale-[1.01]' : 'bg-white border-slate-200 hover:bg-slate-50 hover:border-slate-300 hover:shadow-sm shadow-3xs'}`;
 
                   return (
-                    <div key={key} className="p-4 rounded-xl border border-slate-150 bg-slate-50/40 hover:bg-slate-50 transition-colors space-y-3">
-                      <div className="flex items-center justify-between">
+                    <div 
+                      key={key} 
+                      onClick={() => setSelectedCategoryKey(isSelected ? null : key)}
+                      className={`p-4 rounded-xl border transition-all cursor-pointer space-y-3 ${cardStyle}`}
+                    >
+                      <div className="flex items-center justify-between flex-wrap gap-2">
                         <span className="text-xs font-black text-slate-800 flex items-center gap-1.5 font-bold">
-                          <span className="w-2 h-2 rounded-full bg-blue-500" />
+                          <span className={`w-2.5 h-2.5 rounded-full ${isCategoryClub ? 'bg-amber-500 animate-pulse' : 'bg-blue-500'}`} />
                           {label}
+                          {matchingStudents.length > 0 && (
+                            <span className="text-[10px] text-slate-500 font-mono font-normal">
+                              ({matchingStudents.length} مشارك)
+                            </span>
+                          )}
                         </span>
-                        {!isEditing && (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setEditingCoachKey(key);
-                              setTempCoachName(currentCoach.coachName);
-                              setTempCoachLease(currentCoach.coachLeaseNumber);
-                              setTempCoachPhone(currentCoach.coachPhone);
-                            }}
-                            className="text-[10px] text-blue-600 hover:text-blue-800 font-extrabold flex items-center gap-1 px-2 py-1 rounded bg-blue-50 border border-blue-100 cursor-pointer"
-                          >
-                            <span>تعديل المؤطر</span>
-                          </button>
-                        )}
+                        
+                        <div className="flex items-center gap-1.5">
+                          {isSelected && (
+                            <span className="text-[9px] font-black px-2 py-0.5 rounded-full bg-blue-600 text-white shadow-3xs">
+                              🟢 معروضة حالياً
+                            </span>
+                          )}
+                          {!isSelected && matchingStudents.length > 0 && (
+                            <span className="text-[9px] font-bold text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded">
+                              انقر للعرض 📂
+                            </span>
+                          )}
+
+                          {matchingStudents.length > 0 && (
+                            <button
+                              type="button"
+                              onClick={async (e) => {
+                                e.stopPropagation();
+                                if (!window.confirm(`هل أنت متأكد من حذف فئة "${label}" بالكامل وجميع المشاركين المسجلين بها (${matchingStudents.length} مشارك)؟`)) return;
+                                const toastId = toast.loading(`جاري حذف فئة ${label}...`);
+                                try {
+                                  for (const s of matchingStudents) {
+                                    await DataService.deleteStudent(s.id);
+                                  }
+                                  setStudents(prev => prev.filter(s => !(s.sportId === selectedSportId && s.category === catId && s.gender === g)));
+                                  setPredefinedCoaches(prev => {
+                                    const next = { ...prev };
+                                    delete next[key];
+                                    return next;
+                                  });
+                                  if (selectedCategoryKey === key) {
+                                    setSelectedCategoryKey(null);
+                                  }
+                                  toast.dismiss(toastId);
+                                  toast.success(`تم حذف فئة ${label} بنجاح`);
+                                } catch (err) {
+                                  toast.dismiss(toastId);
+                                  toast.error('حدث خطأ أثناء حذف الفئة');
+                                }
+                              }}
+                              className="text-[10px] text-red-600 hover:text-red-800 font-extrabold flex items-center gap-1 px-2 py-1 rounded bg-red-50 border border-red-200 cursor-pointer"
+                              title="حذف هذه الفئة ومشاركيها"
+                            >
+                              <Trash2 className="w-3 h-3" />
+                              <span>حذف</span>
+                            </button>
+                          )}
+
+                          {!isEditing && (
+                            <div className="flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setEditingCoachKey(key);
+                                  setTempCoachName(currentCoach.coachName);
+                                  setTempCoachLease(currentCoach.coachLeaseNumber);
+                                  setTempCoachPhone(currentCoach.coachPhone);
+                                }}
+                                className="text-[10px] text-blue-600 hover:text-blue-800 font-extrabold flex items-center gap-1 px-2 py-1 rounded bg-blue-50 border border-blue-100 cursor-pointer transition-colors shadow-3xs"
+                              >
+                                <span>تعديل المؤطر</span>
+                              </button>
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  const defaultAff = isCategoryClub ? 'club_affiliated' : 'non_club';
+                                  handleOpenNewStudentForm(catId, g, defaultAff);
+                                }}
+                                className="text-[10px] text-green-700 hover:text-green-900 font-extrabold flex items-center gap-1 px-2 py-1 rounded bg-green-50 border border-green-200 cursor-pointer transition-colors shadow-3xs"
+                              >
+                                <span>إضافة مشارك</span>
+                              </button>
+                            </div>
+                          )}
+                        </div>
                       </div>
 
                       {isEditing ? (
-                        <div className="space-y-2 pt-1">
+                        <div className="space-y-2 pt-1" onClick={(e) => e.stopPropagation()}>
                           <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                             <div>
                               <label className="block text-[9px] font-bold text-slate-500 mb-1">الاسم الكامل *</label>
@@ -1504,14 +1689,18 @@ export const TeacherTeams: React.FC = () => {
                           <div className="flex items-center justify-end gap-2 pt-1">
                             <button
                               type="button"
-                              onClick={() => setEditingCoachKey(null)}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setEditingCoachKey(null);
+                              }}
                               className="text-[10px] text-slate-500 hover:text-slate-700 font-bold px-2.5 py-1"
                             >
                               إلغاء
                             </button>
                             <button
                               type="button"
-                              onClick={async () => {
+                              onClick={async (e) => {
+                                e.stopPropagation();
                                 if (!tempCoachName.trim() || !tempCoachLease.trim() || !tempCoachPhone.trim()) {
                                   toast.error('يرجى ملء جميع حقول المؤطر');
                                   return;
@@ -1584,270 +1773,344 @@ export const TeacherTeams: React.FC = () => {
           )}
 
           {/* Student Roster Table/Grid */}
-          <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs overflow-hidden">
-            <div className="p-3.5 sm:p-4 border-b border-slate-100 bg-slate-50/50 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-              <h4 className="text-xs md:text-sm font-bold text-slate-800 flex items-center gap-2">
-                <Users className="h-4 w-4 text-blue-600 shrink-0" />
-                <span>لائحة التلاميذ المسجلين بالفريق ({activeSportStudents.length} تلاميذ)</span>
-              </h4>
-              <div className="flex items-center gap-2 text-[11px] text-slate-500 font-medium">
-                <span>ذكور: <strong className="text-blue-700">{activeSportStudents.filter(s => s.gender === 'Male').length}</strong></span>
-                <span>•</span>
-                <span>إناث: <strong className="text-rose-600">{activeSportStudents.filter(s => s.gender === 'Female').length}</strong></span>
-              </div>
-            </div>
-
-            {activeSportStudents.length > 0 ? (
-              <>
-                {/* 1. Mobile Cards View (Visible on Small Screens) */}
-                <div className="block md:hidden p-3 space-y-3 bg-slate-50/50">
-                  <div className="text-[11px] text-slate-500 font-medium pb-1 flex items-center justify-between">
-                    <span>بطاقات التلاميذ المسجلين:</span>
-                    <span className="font-bold text-slate-700">{activeSportStudents.length} مشارك</span>
+          {selectedCategoryKey ? (
+            <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs overflow-hidden">
+              <div className="p-3.5 sm:p-4 border-b border-slate-100 bg-slate-50/50 flex flex-col md:flex-row md:items-center justify-between gap-3">
+                <div className="flex flex-col gap-2">
+                  <div className="flex items-center gap-2">
+                    <Users className="h-4 w-4 text-blue-600 shrink-0" />
+                    <h4 className="text-xs md:text-sm font-bold text-slate-800 flex items-center gap-2 flex-wrap">
+                      <span>لائحة التلاميذ المسجلين في فئة:</span>
+                      <span className="text-amber-800 bg-amber-50 px-2.5 py-0.5 rounded-lg border border-amber-200 font-extrabold text-[11px] flex items-center gap-1 shadow-3xs">
+                        <span>🏷️</span>
+                        <span>{getCategoryLabel(selectedCategoryKey.split('_')[0], selectedCategoryKey.split('_')[1])}</span>
+                      </span>
+                      <span className="text-slate-400 font-normal">({displayedSportStudents.length} تلاميذ)</span>
+                    </h4>
                   </div>
-                  {activeSportStudents.map((stud, idx) => (
-                    <div
-                      key={stud.id}
-                      className="p-3.5 bg-white rounded-xl border border-slate-200 shadow-2xs space-y-2.5"
-                    >
-                      <div className="flex items-start gap-3">
-                        <div className="w-12 h-12 rounded-xl border border-slate-200 bg-slate-50 flex items-center justify-center overflow-hidden shrink-0 shadow-3xs">
-                          {stud.photoUrl ? (
-                            <img src={stud.photoUrl} alt={stud.fullName} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
-                          ) : (
-                            <span className="text-xl">
-                              {stud.gender === 'Female' ? '👧' : '👦'}
-                            </span>
-                          )}
-                        </div>
-
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-start justify-between gap-1">
-                            <h5 className="text-xs font-bold text-slate-900 truncate">
-                              {idx + 1}. {stud.fullName}
-                            </h5>
-                            <span className={`inline-flex px-1.5 py-0.5 rounded text-[10px] font-bold border shrink-0 ${
-                              stud.gender === 'Male'
-                                ? 'bg-blue-50 text-blue-700 border-blue-200'
-                                : 'bg-pink-50 text-pink-700 border-pink-200'
-                            }`}>
-                              {stud.gender === 'Male' ? 'ذكر' : 'أنثى'}
-                            </span>
-                          </div>
-
-                          <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[10px]">
-                            {stud.massarNumber && (
-                              <span className="bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200 text-blue-900 font-mono font-bold">
-                                {stud.massarNumber}
-                              </span>
-                            )}
-                            <span className="bg-slate-100 text-slate-800 font-bold px-1.5 py-0.5 rounded border border-slate-200">
-                              {getCategoryLabel(stud.category)}
-                            </span>
-                            {stud.birthDate && (
-                              <span className="text-slate-500 font-mono font-medium">
-                                📅 {stud.birthDate}
-                              </span>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Extra Details row if available */}
-                      <div className="pt-2 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2 text-[10px] text-slate-600">
-                        <div className="flex flex-wrap items-center gap-1.5">
-                          {selectedSportId === 'cross_country' && (
-                            <>
-                              <span className={`px-2 py-0.5 rounded font-bold border ${
-                                stud.participationType === 'school_team'
-                                  ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                                  : 'bg-amber-50 text-amber-700 border-amber-200'
-                              }`}>
-                                {stud.participationType === 'school_team' ? 'فريق المؤسسة' : 'فردي'}
-                              </span>
-                              <span className="font-bold text-blue-700">
-                                المسافة: {stud.distance || getCrossCountryDistance(stud.category, stud.gender)}
-                              </span>
-                            </>
-                          )}
-                          {selectedSportId === 'athletics' && stud.athleticsSpecialty && (
-                            <span className="font-bold text-blue-700 bg-blue-50 px-2 py-0.5 rounded border border-blue-200">
-                              {stud.athleticsSpecialty}
-                            </span>
-                          )}
-                          {stud.coachName && (
-                            <span className="text-slate-500">
-                              المؤطر: <strong className="text-slate-700">{stud.coachName}</strong>
-                            </span>
-                          )}
-                        </div>
-
-                        {/* Actions */}
-                        <div className="flex items-center gap-1 shrink-0 mr-auto">
-                          <button
-                            onClick={() => handleEditStudent(stud)}
-                            title="تعديل بيانات التلميذ"
-                            className="p-1.5 text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors cursor-pointer inline-flex items-center"
-                          >
-                            <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                            </svg>
-                          </button>
-                          <button
-                            onClick={() => handleDeleteStudent(stud.id)}
-                            title="حذف التلميذ"
-                            className="p-1.5 text-red-600 bg-red-50 hover:bg-red-100 rounded-lg transition-colors cursor-pointer inline-flex items-center"
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
+                  <button
+                    type="button"
+                    onClick={() => setIsPdfModalOpen(true)}
+                    className="self-start text-[10px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200 hover:bg-indigo-100 px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors cursor-pointer"
+                  >
+                    <FileText className="w-3.5 h-3.5" />
+                    <span>مطبوع المشاركة</span>
+                  </button>
                 </div>
 
-                {/* 2. Desktop Table View (Visible on Medium and Large Screens) */}
-                <div className="hidden md:block overflow-x-auto">
-                  <table className="w-full text-right border-collapse min-w-[880px]">
-                    <thead>
-                      <tr className="border-b border-slate-100 text-[10px] font-extrabold text-slate-400 bg-slate-50/20 uppercase tracking-wider">
-                        <th className="p-4">الصورة</th>
-                        <th className="p-4">الاسم والنسب</th>
-                        <th className="p-4">رقم مسار</th>
-                        <th className="p-4">الجنس</th>
-                        <th className="p-4">تاريخ الازدياد</th>
-                        <th className="p-4">الفئة</th>
-                        {selectedSportId === 'cross_country' && (
-                          <>
-                            <th className="p-4">نوع المشاركة</th>
-                            <th className="p-4">المسافة</th>
-                          </>
-                        )}
-                        {selectedSportId === 'athletics' && (
-                          <th className="p-4">التخصص</th>
-                        )}
-                        <th className="p-4">المؤسسة</th>
-                        <th className="p-4">الأستاذ المؤطر</th>
-                        <th className="p-4 text-left">الإجراءات</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100 text-xs font-medium text-slate-700">
-                      {activeSportStudents.map((stud) => (
-                        <tr key={stud.id} className="hover:bg-slate-50/50 transition-colors">
-                          <td className="p-4 whitespace-nowrap">
-                            <div className="w-10 h-10 rounded-full border border-slate-200 bg-slate-50 flex items-center justify-center overflow-hidden shrink-0 shadow-3xs">
+                {/* Close Button to Deselect/Reset */}
+                <button
+                  type="button"
+                  onClick={() => setSelectedCategoryKey(null)}
+                  className="px-3 py-1.5 text-xs font-bold rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-50 transition-all cursor-pointer flex items-center gap-1 bg-white shrink-0 shadow-3xs"
+                >
+                  <span>❌</span>
+                  <span>إغلاق تفاصيل الفئة</span>
+                </button>
+              </div>
+
+              {displayedSportStudents.length > 0 ? (
+                <>
+                  {/* 1. Mobile Cards View (Visible on Small Screens) */}
+                  <div className="block md:hidden p-3 space-y-3 bg-slate-50/50">
+                    <div className="text-[11px] text-slate-500 font-medium pb-1 flex items-center justify-between">
+                      <span>بطاقات التلاميذ المعروضين:</span>
+                      <span className="font-bold text-slate-700">{displayedSportStudents.length} مشارك</span>
+                    </div>
+                    {displayedSportStudents.map((stud, idx) => {
+                      const isStudentClub = stud.affiliationType === 'club_affiliated';
+                      return (
+                        <div
+                          key={stud.id}
+                          className={`p-3.5 rounded-xl border shadow-2xs space-y-2.5 transition-all ${
+                            isStudentClub
+                              ? 'bg-amber-50 border-amber-200 shadow-3xs'
+                              : 'bg-white border-slate-200'
+                          }`}
+                        >
+                          <div className="flex items-start gap-3">
+                            <div className="w-12 h-12 rounded-xl border border-slate-200 bg-slate-50 flex items-center justify-center overflow-hidden shrink-0 shadow-3xs">
                               {stud.photoUrl ? (
                                 <img src={stud.photoUrl} alt={stud.fullName} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
                               ) : (
-                                <span className="text-sm font-bold text-slate-400">
-                                  {stud.gender === 'Male' ? '👦' : '👧'}
+                                <span className="text-xl">
+                                  {stud.gender === 'Female' ? '👧' : '👦'}
                                 </span>
                               )}
                             </div>
-                          </td>
-                          <td className="p-4 whitespace-nowrap font-bold text-slate-800">
-                            {stud.fullName}
-                          </td>
-                          <td className="p-4 whitespace-nowrap font-mono text-xs font-bold text-slate-600">
-                            {stud.massarNumber ? (
-                              <span className="bg-slate-100 px-2 py-0.5 rounded border border-slate-200 text-blue-900 font-mono">
-                                {stud.massarNumber}
-                              </span>
-                            ) : (
-                              <span className="text-slate-300">-</span>
-                            )}
-                          </td>
-                          <td className="p-4 whitespace-nowrap">
-                            <span className={`inline-flex px-2 py-0.5 rounded text-[10px] font-bold border ${
-                              stud.gender === 'Male'
-                                ? 'bg-blue-50 text-blue-700 border-blue-200'
-                                : 'bg-pink-50 text-pink-700 border-pink-200'
-                            }`}>
-                              {stud.gender === 'Male' ? 'ذكر' : 'أنثى'}
-                            </span>
-                          </td>
-                          <td className="p-4 whitespace-nowrap font-mono font-bold text-slate-600">
-                            {stud.birthDate}
-                          </td>
-                          <td className="p-4 whitespace-nowrap">
-                            <span className="bg-slate-100 text-slate-800 font-extrabold text-[10px] px-2 py-0.5 rounded border border-slate-200">
-                              {getCategoryLabel(stud.category)}
-                            </span>
-                          </td>
-                          {selectedSportId === 'cross_country' && (
-                            <>
-                              <td className="p-4 whitespace-nowrap">
-                                <span className={`inline-flex px-2.5 py-0.5 rounded text-[10px] font-bold border ${
-                                  stud.participationType === 'school_team'
-                                    ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                                    : 'bg-amber-50 text-amber-700 border-amber-200'
+
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-start justify-between gap-1">
+                                <h5 className="text-xs font-bold text-slate-900 truncate">
+                                  {idx + 1}. {stud.fullName}
+                                </h5>
+                                <span className={`inline-flex px-1.5 py-0.5 rounded text-[10px] font-bold border shrink-0 ${
+                                  stud.gender === 'Male'
+                                    ? 'bg-blue-50 text-blue-700 border-blue-200'
+                                    : 'bg-pink-50 text-pink-700 border-pink-200'
                                 }`}>
-                                  {stud.participationType === 'school_team' ? 'فريق المؤسسة' : 'فردي'}
+                                  {stud.gender === 'Male' ? 'ذكر' : 'أنثى'}
                                 </span>
-                              </td>
-                              <td className="p-4 whitespace-nowrap font-bold text-blue-600">
-                                {stud.distance || getCrossCountryDistance(stud.category, stud.gender)}
-                              </td>
-                            </>
-                          )}
-                          {selectedSportId === 'athletics' && (
-                            <td className="p-4 whitespace-nowrap font-bold text-blue-600">
-                              {stud.athleticsSpecialty || 'غير محدد'}
-                            </td>
-                          )}
-                          <td className="p-4 whitespace-nowrap text-slate-500 font-bold">
-                            {stud.schoolName}
-                          </td>
-                          <td className="p-4 whitespace-nowrap">
-                            {stud.coachName ? (
-                              <div className="space-y-0.5">
-                                <p className="font-extrabold text-slate-800">{stud.coachName}</p>
-                                <p className="text-[10px] text-slate-400 font-mono">SOM: {stud.coachLeaseNumber || '—'}</p>
                               </div>
-                            ) : (
-                              <span className="text-slate-400 text-[10px] italic">تلقائي (المنسق)</span>
-                            )}
-                          </td>
-                          <td className="p-4 whitespace-nowrap text-left">
-                            <div className="flex items-center justify-end gap-1.5">
+
+                              <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[10px]">
+                                {stud.massarNumber && (
+                                  <span className="bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200 text-blue-900 font-mono font-bold">
+                                    {stud.massarNumber}
+                                  </span>
+                                )}
+                                <span className={`font-black px-2 py-0.5 rounded border ${
+                                  stud.gender === 'Female'
+                                    ? 'bg-pink-50 text-pink-800 border-pink-200'
+                                    : 'bg-blue-50 text-blue-800 border-blue-200'
+                                }`}>
+                                  {getCategoryLabel(stud.category, stud.gender)}
+                                </span>
+                                <span className={`inline-flex px-1.5 py-0.5 rounded text-[10px] font-bold border shrink-0 ${
+                                  stud.affiliationType === 'club_affiliated'
+                                    ? 'bg-amber-100 text-amber-800 border-amber-300'
+                                    : 'bg-slate-100 text-slate-700 border-slate-200'
+                                }`}>
+                                  {stud.affiliationType === 'club_affiliated' ? 'منتمي لنادي / عصبة' : 'لا منتمي'}
+                                </span>
+                                {stud.birthDate && (
+                                  <span className="text-slate-500 font-mono font-medium">
+                                    📅 {stud.birthDate}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Extra Details row if available */}
+                          <div className="pt-2 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2 text-[10px] text-slate-600">
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              {selectedSportId === 'cross_country' && (
+                                <>
+                                  <span className={`px-2 py-0.5 rounded font-bold border ${
+                                    stud.participationType === 'school_team'
+                                      ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                      : 'bg-amber-50 text-amber-700 border-amber-200'
+                                  }`}>
+                                    {stud.participationType === 'school_team' ? 'فريق المؤسسة' : 'فردي'}
+                                  </span>
+                                  <span className="font-bold text-blue-700">
+                                    المسافة: {stud.distance || getCrossCountryDistance(stud.category, stud.gender)}
+                                  </span>
+                                </>
+                              )}
+                              {selectedSportId === 'athletics' && stud.athleticsSpecialty && (
+                                <span className="font-bold text-blue-700 bg-blue-50 px-2 py-0.5 rounded border border-blue-200">
+                                  {stud.athleticsSpecialty}
+                                </span>
+                              )}
+                              {stud.coachName && (
+                                <span className="text-slate-500">
+                                  المؤطر: <strong className="text-slate-700">{stud.coachName}</strong>
+                                </span>
+                              )}
+                            </div>
+
+                            {/* Actions */}
+                            <div className="flex items-center gap-1 shrink-0 mr-auto">
                               <button
                                 onClick={() => handleEditStudent(stud)}
                                 title="تعديل بيانات التلميذ"
-                                className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors cursor-pointer inline-flex items-center"
+                                className="p-1.5 text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors cursor-pointer inline-flex items-center"
                               >
-                                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
                                 </svg>
                               </button>
                               <button
                                 onClick={() => handleDeleteStudent(stud.id)}
                                 title="حذف التلميذ"
-                                className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors cursor-pointer inline-flex items-center"
+                                className="p-1.5 text-red-600 bg-red-50 hover:bg-red-100 rounded-lg transition-colors cursor-pointer inline-flex items-center"
                               >
-                                <Trash2 className="h-4 w-4" />
+                                <Trash2 className="h-3.5 w-3.5" />
                               </button>
                             </div>
-                          </td>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {/* 2. Desktop Table View (Visible on Medium and Large Screens) */}
+                  <div className="hidden md:block overflow-x-auto">
+                    <table className="w-full text-right border-collapse min-w-[880px]">
+                      <thead>
+                        <tr className="border-b border-slate-100 text-[10px] font-extrabold text-slate-400 bg-slate-50/20 uppercase tracking-wider">
+                          <th className="p-4">الصورة</th>
+                          <th className="p-4">الاسم والنسب</th>
+                          <th className="p-4">رقم مسار</th>
+                          <th className="p-4">الجنس</th>
+                          <th className="p-4">تاريخ الازدياد</th>
+                          <th className="p-4">الفئة</th>
+                          <th className="p-4">الانتماء الرياضي</th>
+                          {selectedSportId === 'cross_country' && (
+                            <>
+                              <th className="p-4">نوع المشاركة</th>
+                              <th className="p-4">المسافة</th>
+                            </>
+                          )}
+                          {selectedSportId === 'athletics' && (
+                            <th className="p-4">التخصص</th>
+                          )}
+                          <th className="p-4">المؤسسة</th>
+                          <th className="p-4">الأستاذ المؤطر</th>
+                          <th className="p-4 text-left">الإجراءات</th>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 text-xs font-medium text-slate-700">
+                        {displayedSportStudents.map((stud) => {
+                          const isStudentClub = stud.affiliationType === 'club_affiliated';
+                          return (
+                            <tr 
+                              key={stud.id} 
+                              className={`transition-colors ${
+                                isStudentClub
+                                  ? 'bg-amber-50/65 hover:bg-amber-100/60'
+                                  : 'hover:bg-slate-50/50 bg-white'
+                              }`}
+                            >
+                              <td className="p-4 whitespace-nowrap">
+                                <div className="w-10 h-10 rounded-full border border-slate-200 bg-slate-50 flex items-center justify-center overflow-hidden shrink-0 shadow-3xs">
+                                  {stud.photoUrl ? (
+                                    <img src={stud.photoUrl} alt={stud.fullName} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                                  ) : (
+                                    <span className="text-sm font-bold text-slate-400">
+                                      {stud.gender === 'Male' ? '👦' : '👧'}
+                                    </span>
+                                  )}
+                                </div>
+                              </td>
+                              <td className="p-4 whitespace-nowrap font-bold text-slate-800">
+                                {stud.fullName}
+                              </td>
+                              <td className="p-4 whitespace-nowrap font-mono text-xs font-bold text-slate-600">
+                                {stud.massarNumber ? (
+                                  <span className="bg-slate-100 px-2 py-0.5 rounded border border-slate-200 text-blue-900 font-mono">
+                                    {stud.massarNumber}
+                                  </span>
+                                ) : (
+                                  <span className="text-slate-300">-</span>
+                                )}
+                              </td>
+                              <td className="p-4 whitespace-nowrap">
+                                <span className={`inline-flex px-2 py-0.5 rounded text-[10px] font-bold border ${
+                                  stud.gender === 'Male'
+                                    ? 'bg-blue-50 text-blue-700 border-blue-200'
+                                    : 'bg-pink-50 text-pink-700 border-pink-200'
+                                }`}>
+                                  {stud.gender === 'Male' ? 'ذكر' : 'أنثى'}
+                                </span>
+                              </td>
+                              <td className="p-4 whitespace-nowrap font-mono font-bold text-slate-600">
+                                {stud.birthDate}
+                              </td>
+                              <td className="p-4 whitespace-nowrap">
+                                <span className={`font-black text-[11px] px-2.5 py-1 rounded-lg border ${
+                                  stud.gender === 'Female'
+                                    ? 'bg-pink-50 text-pink-800 border-pink-200'
+                                    : 'bg-blue-50 text-blue-800 border-blue-200'
+                                }`}>
+                                  {getCategoryLabel(stud.category, stud.gender)}
+                                </span>
+                              </td>
+                              <td className="p-4 whitespace-nowrap">
+                                <span className={`inline-flex px-2 py-0.5 rounded text-[10px] font-bold border ${
+                                  stud.affiliationType === 'club_affiliated'
+                                    ? 'bg-amber-100 text-amber-800 border-amber-300'
+                                    : 'bg-slate-100 text-slate-700 border-slate-200'
+                                }`}>
+                                  {stud.affiliationType === 'club_affiliated' ? 'منتمي لنادي / عصبة' : 'لا منتمي'}
+                                </span>
+                              </td>
+                              {selectedSportId === 'cross_country' && (
+                                <>
+                                  <td className="p-4 whitespace-nowrap">
+                                    <span className={`inline-flex px-2.5 py-0.5 rounded text-[10px] font-bold border ${
+                                      stud.participationType === 'school_team'
+                                        ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                        : 'bg-amber-50 text-amber-700 border-amber-200'
+                                    }`}>
+                                      {stud.participationType === 'school_team' ? 'فريق المؤسسة' : 'فردي'}
+                                    </span>
+                                  </td>
+                                  <td className="p-4 whitespace-nowrap font-bold text-blue-600">
+                                    {stud.distance || getCrossCountryDistance(stud.category, stud.gender)}
+                                  </td>
+                                </>
+                              )}
+                              {selectedSportId === 'athletics' && (
+                                <td className="p-4 whitespace-nowrap font-bold text-blue-600">
+                                  {stud.athleticsSpecialty || 'غير محدد'}
+                                </td>
+                              )}
+                              <td className="p-4 whitespace-nowrap text-slate-500 font-bold">
+                                {stud.schoolName}
+                              </td>
+                              <td className="p-4 whitespace-nowrap">
+                                {stud.coachName ? (
+                                  <div className="space-y-0.5">
+                                    <p className="font-extrabold text-slate-800">{stud.coachName}</p>
+                                    <p className="text-[10px] text-slate-400 font-mono">SOM: {stud.coachLeaseNumber || '—'}</p>
+                                  </div>
+                                ) : (
+                                  <span className="text-slate-400 text-[10px] italic">تلقائي (المنسق)</span>
+                                )}
+                              </td>
+                              <td className="p-4 whitespace-nowrap text-left">
+                                <div className="flex items-center justify-end gap-1.5">
+                                  <button
+                                    onClick={() => handleEditStudent(stud)}
+                                    title="تعديل بيانات التلميذ"
+                                    className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors cursor-pointer inline-flex items-center"
+                                  >
+                                    <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                                    </svg>
+                                  </button>
+                                  <button
+                                    onClick={() => handleDeleteStudent(stud.id)}
+                                    title="حذف التلميذ"
+                                    className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors cursor-pointer inline-flex items-center"
+                                  >
+                                    <Trash2 className="h-4 w-4" />
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </>
+              ) : (
+                <div className="p-12 text-center text-slate-500 space-y-3">
+                  <div className="w-12 h-12 rounded-full bg-slate-50 border border-slate-100 flex items-center justify-center mx-auto text-xl">
+                    📋
+                  </div>
+                  <div>
+                    <p className="text-xs font-bold text-slate-700">لا يوجد أي تلاميذ مسجلين حالياً في هذه الفئة</p>
+                    <p className="text-[10px] text-slate-400 mt-1 max-w-xs mx-auto">
+                      اضغط على زر "إضافة تلميذ جديد" بالأعلى للبدء في إضافة تلاميذ لهذه الفئة المحددة.
+                    </p>
+                  </div>
                 </div>
-              </>
-            ) : (
-              <div className="p-12 text-center text-slate-500 space-y-3">
-                <div className="w-12 h-12 rounded-full bg-slate-50 border border-slate-100 flex items-center justify-center mx-auto text-xl">
-                  📋
-                </div>
-                <div>
-                  <p className="text-xs font-bold text-slate-700">لا يوجد أي تلاميذ مسجلين حالياً</p>
-                  <p className="text-[10px] text-slate-400 mt-1 max-w-xs mx-auto">
-                    اضغط على زر "إضافة تلميذ جديد" بالأعلى للبدء في تشكيل وإدخال لائحة فريق مؤسستك لهذه الرياضة.
-                  </p>
-                </div>
+              )}
+            </div>
+          ) : (
+            <div className="bg-slate-50/50 rounded-2xl border border-dashed border-slate-200 p-8 text-center space-y-2">
+              <div className="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center mx-auto text-lg">
+                📂
               </div>
-            )}
-          </div>
+              <p className="text-xs font-bold text-slate-700">يرجى الضغط على إحدى بطاقات الفئات أعلاه لعرض لائحة التلاميذ</p>
+              <p className="text-[10px] text-slate-400">انقر على بطاقة الفئة للدخول إليها وتصفح أو تعديل قائمة التلاميذ المسجلين في تلك الفئة المحددة.</p>
+            </div>
+          )}
         </div>
       )}
 
@@ -1891,11 +2154,13 @@ export const TeacherTeams: React.FC = () => {
           isOpen={isPdfModalOpen}
           onClose={() => setIsPdfModalOpen(false)}
           students={activeSportStudents}
-          sportId={selectedSportId}
-          sportName={getSportName(selectedSportId)}
+          sport={sportsConfig.find(s => s.id === selectedSportId) || null}
           schoolName={schoolName}
           season={currentSeason}
-          directorate={activeDirectorateObj || undefined}
+          directorateName={activeDirectorateObj?.name}
+          regionName={activeDirectorateObj?.regionName}
+          preselectedCategory={selectedCategoryKey ? selectedCategoryKey.split('_')[0] : undefined}
+          preselectedGender={selectedCategoryKey ? selectedCategoryKey.split('_')[1] as 'Male' | 'Female' : undefined}
         />
       )}
     </div>

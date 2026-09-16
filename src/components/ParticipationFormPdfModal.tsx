@@ -65,17 +65,49 @@ export const ParticipationFormPdfModal: React.FC<ParticipationFormPdfModalProps>
     return Array.from(names);
   }, [students]);
 
-  const firstStudentWithCoach = useMemo(() => {
-    return students.find(s => s.coachName);
-  }, [students]);
+  // Filter students by selected category, gender, and coach
+  const filteredStudents = useMemo(() => {
+    return students.filter(st => {
+      if (!st) return false;
+      const matchCat = selectedCategory === 'ALL' || (st.category && st.category.toUpperCase() === selectedCategory.toUpperCase());
+      const matchGen = selectedGender === 'ALL' || st.gender === selectedGender;
+      const matchCoach = selectedCoachFilter === 'ALL' || st.coachName === selectedCoachFilter;
+      return matchCat && matchGen && matchCoach;
+    });
+  }, [students, selectedCategory, selectedGender, selectedCoachFilter]);
 
-  const defaultCoachName = firstStudentWithCoach?.coachName || teacher?.fullName || '';
-  const defaultCoachLease = firstStudentWithCoach?.coachLeaseNumber || teacher?.leaseNumber || '';
-  const defaultCoachPhone = firstStudentWithCoach?.coachPhone || teacher?.phone || '';
+  // Derive the best matching coach for the selected filter / category / gender
+  const activeCoachFromStudents = useMemo(() => {
+    // 1. Look in filtered students first
+    const fromFiltered = filteredStudents.find(s => s.coachName && s.coachName.trim() !== '');
+    if (fromFiltered) {
+      return {
+        name: fromFiltered.coachName || '',
+        lease: fromFiltered.coachLeaseNumber || '',
+        phone: fromFiltered.coachPhone || ''
+      };
+    }
+    // 2. Look in all students
+    const fromAll = students.find(s => s.coachName && s.coachName.trim() !== '');
+    if (fromAll) {
+      return {
+        name: fromAll.coachName || '',
+        lease: fromAll.coachLeaseNumber || '',
+        phone: fromAll.coachPhone || ''
+      };
+    }
+    // 3. Fallback to teacher profile
+    return {
+      name: teacher?.fullName || '',
+      lease: teacher?.leaseNumber || '',
+      phone: teacher?.phone || ''
+    };
+  }, [filteredStudents, students, teacher]);
 
-  const [localCoachName, setLocalCoachName] = useState(defaultCoachName);
-  const [localCoachLease, setLocalCoachLease] = useState(defaultCoachLease);
-  const [localCoachPhone, setLocalCoachPhone] = useState(defaultCoachPhone);
+  const [localCoachName, setLocalCoachName] = useState(activeCoachFromStudents.name);
+  const [localCoachLease, setLocalCoachLease] = useState(activeCoachFromStudents.lease);
+  const [localCoachPhone, setLocalCoachPhone] = useState(activeCoachFromStudents.phone);
+  const [isSavingCoach, setIsSavingCoach] = useState(false);
   const [officialLogos, setOfficialLogos] = useState<OfficialLogos>({});
 
   useEffect(() => {
@@ -95,11 +127,11 @@ export const ParticipationFormPdfModal: React.FC<ParticipationFormPdfModalProps>
         setLocalCoachPhone(matchStud.coachPhone || '');
       }
     } else {
-      setLocalCoachName(defaultCoachName);
-      setLocalCoachLease(defaultCoachLease);
-      setLocalCoachPhone(defaultCoachPhone);
+      setLocalCoachName(activeCoachFromStudents.name);
+      setLocalCoachLease(activeCoachFromStudents.lease);
+      setLocalCoachPhone(activeCoachFromStudents.phone);
     }
-  }, [selectedCoachFilter, students, defaultCoachName, defaultCoachLease, defaultCoachPhone]);
+  }, [selectedCoachFilter, activeCoachFromStudents, students]);
 
   useEffect(() => {
     if (isOpen) {
@@ -121,15 +153,6 @@ export const ParticipationFormPdfModal: React.FC<ParticipationFormPdfModalProps>
     const activeCats = rawCats.filter(catId => students.some(s => s.category === catId));
     return activeCats.length > 0 ? activeCats : rawCats;
   })();
-
-  // Filter students by selected category, gender, and coach
-  const filteredStudents = students.filter(st => {
-    if (!st) return false;
-    const matchCat = selectedCategory === 'ALL' || (st.category && st.category.toUpperCase() === selectedCategory.toUpperCase());
-    const matchGen = selectedGender === 'ALL' || st.gender === selectedGender;
-    const matchCoach = selectedCoachFilter === 'ALL' || st.coachName === selectedCoachFilter;
-    return matchCat && matchGen && matchCoach;
-  });
 
   const getCategoryLabel = (catId: string) => {
     if (catId === 'ALL') return 'جميع الفئات';
@@ -299,45 +322,88 @@ export const ParticipationFormPdfModal: React.FC<ParticipationFormPdfModalProps>
         </div>
 
         {/* Dynamic Coach Editor Bar */}
-        <div className="p-3 bg-blue-50/50 border-b border-slate-200/80 flex flex-wrap items-center gap-4 text-xs shrink-0">
-          <div className="flex items-center gap-1">
-            <span className="text-sm">👨‍🏫</span>
+        <div className="p-3 bg-blue-50/70 border-b border-slate-200/80 flex flex-wrap items-center justify-between gap-3 text-xs shrink-0">
+          <div className="flex items-center gap-1.5">
+            <span className="text-base">👨‍🏫</span>
             <span className="font-black text-slate-800">بيانات المؤطر على المطبوع:</span>
           </div>
           
-          <div className="flex flex-wrap items-center gap-3 flex-1">
-            <div className="flex items-center gap-1.5">
-              <span className="font-bold text-slate-500">الاسم الكامل:</span>
+          <div className="flex flex-wrap items-center gap-2.5 flex-1">
+            <div className="flex items-center gap-1">
+              <span className="font-bold text-slate-600">الاسم:</span>
               <input
                 type="text"
                 placeholder="اسم المؤطر"
-                className="px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-bold text-slate-700 w-44"
+                className="px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-bold text-slate-800 w-36 sm:w-44 focus:ring-1 focus:ring-blue-500"
                 value={localCoachName}
                 onChange={(e) => setLocalCoachName(e.target.value)}
               />
             </div>
 
-            <div className="flex items-center gap-1.5">
-              <span className="font-bold text-slate-500">رقم التأجير:</span>
+            <div className="flex items-center gap-1">
+              <span className="font-bold text-slate-600">SOM:</span>
               <input
                 type="text"
-                placeholder="SOM"
-                className="px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-bold text-slate-700 w-24 font-mono"
+                placeholder="رقم التأجير"
+                className="px-2 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-bold text-slate-800 w-24 font-mono focus:ring-1 focus:ring-blue-500"
                 value={localCoachLease}
                 onChange={(e) => setLocalCoachLease(e.target.value)}
               />
             </div>
 
-            <div className="flex items-center gap-1.5">
-              <span className="font-bold text-slate-500">الهاتف:</span>
+            <div className="flex items-center gap-1">
+              <span className="font-bold text-slate-600">الهاتف:</span>
               <input
                 type="text"
-                placeholder="الهاتف"
-                className="px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-bold text-slate-700 w-28 font-mono"
+                placeholder="رقم الهاتف"
+                className="px-2 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-bold text-slate-800 w-28 font-mono focus:ring-1 focus:ring-blue-500"
                 value={localCoachPhone}
                 onChange={(e) => setLocalCoachPhone(e.target.value)}
               />
             </div>
+
+            <button
+              type="button"
+              disabled={isSavingCoach || !localCoachName.trim()}
+              onClick={async () => {
+                if (!localCoachName.trim()) {
+                  toast.error('يرجى إدخال اسم المؤطر');
+                  return;
+                }
+                const targets = filteredStudents.length > 0 ? filteredStudents : students;
+                if (targets.length === 0) {
+                  toast.error('لا يوجد مشاركون لحفظ بيانات المؤطر لهم');
+                  return;
+                }
+                setIsSavingCoach(true);
+                const toastId = toast.loading('جاري تثبيت وتحديث بيانات المؤطر...');
+                try {
+                  for (const st of targets) {
+                    await DataService.updateStudent(st.id, {
+                      coachName: localCoachName.trim(),
+                      coachLeaseNumber: localCoachLease.trim(),
+                      coachPhone: localCoachPhone.trim()
+                    });
+                    st.coachName = localCoachName.trim();
+                    st.coachLeaseNumber = localCoachLease.trim();
+                    st.coachPhone = localCoachPhone.trim();
+                  }
+                  toast.dismiss(toastId);
+                  toast.success('تم تثبيت بيانات المؤطر بنجاح لجميع المشاركين المعنيين!');
+                } catch (err) {
+                  console.error('Error saving coach:', err);
+                  toast.dismiss(toastId);
+                  toast.error('حدث خطأ أثناء حفظ بيانات المؤطر');
+                } finally {
+                  setIsSavingCoach(false);
+                }
+              }}
+              className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-bold text-[11px] rounded-lg shadow-3xs flex items-center gap-1 cursor-pointer transition-colors mr-auto"
+              title="تثبيت هذه البيانات وحفظها تلقائياً على بطاقات التلاميذ"
+            >
+              <CheckCircle2 className="w-3.5 h-3.5" />
+              <span>{isSavingCoach ? 'جاري الحفظ...' : 'تثبيت المؤطر للتلاميذ'}</span>
+            </button>
           </div>
         </div>
 
@@ -449,16 +515,16 @@ export const ParticipationFormPdfModal: React.FC<ParticipationFormPdfModalProps>
               </div>
               <div className="grid grid-cols-12 bg-white text-center text-xs items-center">
                 <div className="col-span-4 p-2 font-black text-slate-900 text-right border-l border-slate-200">
-                  {teacher?.fullName || '—'}
+                  {localCoachName || teacher?.fullName || '—'}
                 </div>
                 <div className="col-span-3 p-2 font-bold text-slate-700 text-right border-l border-slate-200">
                   {teacher?.workLocation || schoolName}
                 </div>
                 <div className="col-span-2 p-2 font-mono font-bold text-slate-900 border-l border-slate-200">
-                  {teacher?.leaseNumber || '—'}
+                  {localCoachLease || teacher?.leaseNumber || '—'}
                 </div>
                 <div className="col-span-2 p-2 font-mono font-bold text-slate-900 border-l border-slate-200">
-                  {teacher?.phone || '—'}
+                  {localCoachPhone || teacher?.phone || '—'}
                 </div>
                 <div className="col-span-1 p-1 flex items-center justify-center">
                   {teacher?.photoUrl ? (
@@ -501,7 +567,7 @@ export const ParticipationFormPdfModal: React.FC<ParticipationFormPdfModalProps>
                           <td className="p-1.5 font-mono text-slate-700 border-l border-slate-200">{st.birthDate}</td>
                           <td className="p-1.5 font-bold text-slate-900 border-l border-slate-200">{st.category}</td>
                           <td className="p-1.5 font-bold text-slate-700 text-center border-l border-slate-200">
-                            {st.affiliationType === 'club_affiliated' ? 'للمنتمين للأندية' : 'لغير المنتمين للأندية'}
+                            {st.affiliationType === 'club_affiliated' ? 'للمنتمين للأندية' : 'لا منتمين'}
                           </td>
                           <td className="p-1.5 font-semibold text-slate-700 text-right border-l border-slate-200">{st.schoolName || schoolName}</td>
                           <td className="p-1 flex items-center justify-center">

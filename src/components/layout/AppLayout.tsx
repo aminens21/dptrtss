@@ -273,15 +273,15 @@ export const AppLayout: React.FC = () => {
   const getRoleLabel = (user?: any) => {
     if (!user) return 'مستخدم';
     if (user.isTechCommitteeHead) {
-      return 'رئيس لجنة تقنية';
+      return 'رئيس لجنة تقنية إقليمية';
     }
     switch (user.role) {
       case 'CENTRAL_ADMIN':
-        return user.isSuperAdmin ? 'المسير المركزي العام' : 'المسير الإقليمي';
+        return user.isSuperAdmin ? 'المسؤول المركزي' : 'مسير إقليمي';
       case 'SPORT_MANAGER':
-        return 'مسؤول نشاط رياضي';
+        return 'منسق مادة التربية البدنية بالمؤسسة';
       case 'TEACHER':
-        return 'أستاذ تربية بدنية (EPS)';
+        return 'أستاذ مؤطر';
       case 'REFEREE':
         return 'حكم معتمد';
       default:

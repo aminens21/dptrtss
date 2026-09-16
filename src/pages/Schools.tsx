@@ -426,24 +426,50 @@ export const Schools: React.FC = () => {
     return ids;
   }, [selectedSport, matches, students, schools]);
 
-  const filtered = schools.filter(s => {
-    const coordinatorStr = (s.coordinatorName || s.teacherName || '').toLowerCase();
-    const principalStr = (s.principalName || '').toLowerCase();
-    const matchSearch = s.name.toLowerCase().includes(search.toLowerCase()) ||
-                        s.commune.toLowerCase().includes(search.toLowerCase()) ||
-                        coordinatorStr.includes(search.toLowerCase()) ||
-                        principalStr.includes(search.toLowerCase()) ||
-                        (s.phone || '').includes(search) ||
-                        (s.principalPhone || '').includes(search);
-    const matchType = typeFilter === 'ALL' || s.type === typeFilter;
-    const matchCommune = communeFilter === 'ALL' || s.commune.includes(communeFilter);
-    const matchSport = selectedSport === 'ALL' || (participatingSchoolIdsForSport && (
-      participatingSchoolIdsForSport.has(s.id) || 
-      participatingSchoolIdsForSport.has(s.name.trim().toLowerCase())
-    ));
-    const matchSchool = selectedSchoolFilter === 'ALL' || s.id === selectedSchoolFilter || s.name === selectedSchoolFilter;
-    return matchSearch && matchType && matchCommune && matchSport && matchSchool;
-  });
+  const isTeacherSchool = (s: School) => {
+    if (!userProfile?.workLocation) return false;
+    const cleanWorkLoc = userProfile.workLocation.trim().toLowerCase();
+    const cleanSchoolName = (s.name || '').trim().toLowerCase();
+    return (
+      cleanSchoolName === cleanWorkLoc ||
+      cleanSchoolName.includes(cleanWorkLoc) ||
+      cleanWorkLoc.includes(cleanSchoolName) ||
+      (userProfile.schoolId && s.id === userProfile.schoolId)
+    );
+  };
+
+  const filtered = useMemo(() => {
+    const list = schools.filter(s => {
+      const coordinatorStr = (s.coordinatorName || s.teacherName || '').toLowerCase();
+      const principalStr = (s.principalName || '').toLowerCase();
+      const matchSearch = s.name.toLowerCase().includes(search.toLowerCase()) ||
+                          s.commune.toLowerCase().includes(search.toLowerCase()) ||
+                          coordinatorStr.includes(search.toLowerCase()) ||
+                          principalStr.includes(search.toLowerCase()) ||
+                          (s.phone || '').includes(search) ||
+                          (s.principalPhone || '').includes(search);
+      const matchType = typeFilter === 'ALL' || s.type === typeFilter;
+      const matchCommune = communeFilter === 'ALL' || s.commune.includes(communeFilter);
+      const matchSport = selectedSport === 'ALL' || (participatingSchoolIdsForSport && (
+        participatingSchoolIdsForSport.has(s.id) || 
+        participatingSchoolIdsForSport.has(s.name.trim().toLowerCase())
+      ));
+      const matchSchool = selectedSchoolFilter === 'ALL' || s.id === selectedSchoolFilter || s.name === selectedSchoolFilter;
+      return matchSearch && matchType && matchCommune && matchSport && matchSchool;
+    });
+
+    if (userProfile?.workLocation) {
+      list.sort((a, b) => {
+        const aMine = isTeacherSchool(a);
+        const bMine = isTeacherSchool(b);
+        if (aMine && !bMine) return -1;
+        if (!aMine && bMine) return 1;
+        return 0;
+      });
+    }
+
+    return list;
+  }, [schools, search, typeFilter, communeFilter, selectedSport, selectedSchoolFilter, participatingSchoolIdsForSport, userProfile?.workLocation, userProfile?.schoolId]);
 
   const highSchoolsCount = schools.filter(s => s.type === 'تأهيلي').length;
   const middleSchoolsCount = schools.filter(s => s.type === 'إعدادي').length;
@@ -523,6 +549,29 @@ export const Schools: React.FC = () => {
           )}
         </div>
       </div>
+
+      {/* Teacher's School Highlight Notice */}
+      {userProfile?.workLocation && (
+        <div className="p-3.5 bg-gradient-to-r from-amber-500/15 via-amber-50 to-white border border-amber-300/90 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs text-amber-950 font-bold shadow-xs">
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-xl bg-amber-500 text-white flex items-center justify-center font-bold text-sm shadow-2xs shrink-0">
+              🏫
+            </div>
+            <div>
+              <p className="font-extrabold text-amber-950">
+                مرحباً بك يا أستاذ! تم إبراز مؤسستك (<span className="text-amber-900 underline font-black">{userProfile.workLocation}</span>) في أول القائمة بلون مُميّز.
+              </p>
+              <p className="text-[11px] text-amber-800 font-normal">
+                تظهر مؤسستك دائماً في المرتبة الأولى لتسهيل الوصول المباشر إلى تلاميذك ومشاركاتك.
+              </p>
+            </div>
+          </div>
+          <span className="shrink-0 self-start sm:self-center inline-flex items-center gap-1 text-[11px] font-black bg-amber-500 text-white px-3 py-1 rounded-full shadow-2xs">
+            <span>مؤسستي أولاً</span>
+            <span>⭐</span>
+          </span>
+        </div>
+      )}
 
       {/* Quick Stats */}
       <div className="grid grid-cols-3 gap-3">
@@ -784,11 +833,34 @@ export const Schools: React.FC = () => {
                       stud => (stud.schoolId === s.id || stud.schoolName === s.name) && (selectedSport === 'ALL' || stud.sportId === selectedSport)
                     );
                     const count = schoolStudentsForSport.length;
+                    const isMine = isTeacherSchool(s);
 
                     return (
-                      <tr key={s.id} className="hover:bg-slate-50/90 transition-colors">
-                        <td className="p-3 font-mono font-bold text-slate-400 text-center">{idx + 1}</td>
-                        <td className="p-3 font-bold text-slate-900">{s.name}</td>
+                      <tr key={s.id} className={`transition-colors ${
+                        isMine 
+                          ? 'bg-amber-50/95 hover:bg-amber-100/90 border-y-2 border-amber-400 font-bold shadow-2xs' 
+                          : 'hover:bg-slate-50/90'
+                      }`}>
+                        <td className="p-3 font-mono font-bold text-center">
+                          {isMine ? (
+                            <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-amber-500 text-white text-[10px] font-black shadow-2xs" title="مؤسستك المعتمدة">
+                              ⭐ 1
+                            </span>
+                          ) : (
+                            <span className="text-slate-400">{idx + 1}</span>
+                          )}
+                        </td>
+                        <td className="p-3 font-bold text-slate-900">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className={isMine ? 'text-amber-950 font-black text-sm' : ''}>{s.name}</span>
+                            {isMine && (
+                              <span className="text-[10px] font-black px-2.5 py-0.5 rounded-full bg-amber-500 text-white shadow-2xs inline-flex items-center gap-1">
+                                <span>مقر عملي</span>
+                                <span>🏫</span>
+                              </span>
+                            )}
+                          </div>
+                        </td>
                         <td className="p-3">
                           <span className={`inline-block text-[10px] font-bold px-2 py-0.5 rounded border ${
                             s.type === 'تأهيلي' ? 'bg-blue-50 text-blue-700 border-blue-200' :
@@ -868,17 +940,35 @@ export const Schools: React.FC = () => {
                 stud => (stud.schoolId === s.id || stud.schoolName === s.name) && (selectedSport === 'ALL' || stud.sportId === selectedSport)
               );
               const count = schoolStudentsForSport.length;
+              const isMine = isTeacherSchool(s);
 
               return (
                 <div
                   key={s.id}
                   onClick={() => setSelectedSchoolForParticipants(s)}
-                  className="flex flex-col justify-between rounded-xl bg-white p-4 border border-slate-200 shadow-xs hover:border-blue-400 hover:shadow-md transition-all space-y-3 cursor-pointer group"
+                  className={`flex flex-col justify-between rounded-2xl p-4 transition-all space-y-3 cursor-pointer group ${
+                    isMine
+                      ? 'bg-gradient-to-br from-indigo-50/95 via-sky-50/30 to-white border-2 border-indigo-500 shadow-md ring-2 ring-indigo-500/20'
+                      : 'bg-white border border-slate-200 shadow-xs hover:border-blue-400 hover:shadow-md'
+                  }`}
                 >
                   <div>
+                    {isMine && (
+                      <div className="flex items-center justify-between text-[11px] font-black text-indigo-950 bg-indigo-100/90 px-2.5 py-1 rounded-lg border border-indigo-300 mb-2.5 shadow-3xs">
+                        <span className="flex items-center gap-1">
+                          <span>⭐</span>
+                          <span>مؤسستك التعليمية ومقر عملك</span>
+                        </span>
+                        <span className="text-[10px] bg-indigo-600 text-white px-2 py-0.5 rounded font-bold">المؤسسة رقم 1</span>
+                      </div>
+                    )}
                     <div className="flex items-start justify-between gap-2 mb-2">
                       <div className="flex items-center gap-2.5">
-                        <div className="w-9 h-9 rounded-xl bg-blue-50 text-blue-700 flex items-center justify-center border border-blue-100 shrink-0 font-bold group-hover:bg-blue-600 group-hover:text-white transition-colors">
+                        <div className={`w-9 h-9 rounded-xl flex items-center justify-center border shrink-0 font-bold transition-colors ${
+                          isMine
+                            ? 'bg-indigo-600 text-white border-indigo-700 shadow-xs'
+                            : 'bg-blue-50 text-blue-700 border-blue-100 group-hover:bg-blue-600 group-hover:text-white'
+                        }`}>
                           🏫
                         </div>
                         <div>
@@ -994,7 +1084,7 @@ export const Schools: React.FC = () => {
                             <span className="font-black text-slate-700">الأصناف:</span>
                             {hasSchoolOnly && (
                               <span className="px-1.5 py-0.5 bg-white text-slate-800 font-bold border border-slate-300 rounded-md">
-                                ⚪ غير منتمين
+                                ⚪ لا منتمين
                               </span>
                             )}
                             {hasClub && (

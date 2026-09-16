@@ -23,7 +23,6 @@ import {
   AlertCircle,
   CheckCircle2,
   Settings,
-  GraduationCap,
   Award,
   Medal,
   Download
@@ -944,7 +943,7 @@ export const Tournaments: React.FC = () => {
                                   🟡 للمنتمين للأندية
                                 </span>
                                 <span className="text-[9px] font-extrabold bg-slate-100 text-slate-800 px-1.5 py-0.2 rounded border border-slate-300 shadow-3xs">
-                                  ⚪ لغير المنتمين للأندية
+                                  ⚪ لا منتمين
                                 </span>
                               </div>
                             ) : isClub ? (
@@ -953,7 +952,7 @@ export const Tournaments: React.FC = () => {
                               </span>
                             ) : (
                               <span className="text-[9px] font-extrabold bg-slate-100 text-slate-800 px-1.5 py-0.2 rounded border border-slate-300 shadow-3xs">
-                                ⚪ لغير المنتمين للأندية
+                                ⚪ لا منتمين
                               </span>
                             )}
                             {isManagerSpecialty && (
@@ -1055,22 +1054,11 @@ export const Tournaments: React.FC = () => {
                   <div className="p-3 bg-slate-50 border-t border-slate-100 flex items-center justify-between gap-2">
                     <button
                       onClick={() => handleOpenSportModal(sport)}
-                      className="flex-1 py-2 px-3 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-xl flex items-center justify-center gap-1.5 transition-all shadow-3xs cursor-pointer"
+                      className="flex-1 py-2.5 px-3 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-xl flex items-center justify-center gap-1.5 transition-all shadow-3xs cursor-pointer"
                     >
                       <Layers className="h-4 w-4" />
-                      <span>استعراض الفئات والبطولة ({categoriesList.length})</span>
+                      <span>تسجيل الفرق والمشاركين</span>
                     </button>
-
-                    {userProfile?.role === 'TEACHER' && (
-                      <button
-                        onClick={() => navigate(`/teacher-teams?sport=${sport.id}`)}
-                        title="تسجيل وإدارة مشاركة مؤسستك"
-                        className="py-2 px-3 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl flex items-center gap-1 transition-all shadow-3xs cursor-pointer shrink-0"
-                      >
-                        <GraduationCap className="h-4 w-4" />
-                        <span>تسجيل مؤسستي</span>
-                      </button>
-                    )}
 
                     {canManageThis && (
                       <div className="flex items-center gap-1.5">

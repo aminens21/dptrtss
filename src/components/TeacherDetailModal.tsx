@@ -92,13 +92,17 @@ export const TeacherDetailModal: React.FC<TeacherDetailModalProps> = ({
                 </span>
 
                 <span className="text-[10px] font-extrabold px-2.5 py-0.5 rounded-full bg-blue-500/30 text-blue-200 border border-blue-400/30">
-                  {teacher.role === 'CENTRAL_ADMIN'
-                    ? 'المسير المركزي'
+                  {teacher.isSuperAdmin
+                    ? 'المسؤول المركزي'
+                    : teacher.role === 'CENTRAL_ADMIN'
+                    ? 'مسير إقليمي'
+                    : teacher.role === 'SPORT_MANAGER'
+                    ? 'منسق مادة التربية البدنية بالمؤسسة'
                     : teacher.isTechCommitteeHead
                     ? 'رئيس لجنة تقنية إقليمية'
                     : teacher.isTechCommitteeMember
                     ? 'عضو لجنة تقنية إقليمية'
-                    : 'أستاذ مؤطر تربية بدنية'}
+                    : 'أستاذ مؤطر'}
                 </span>
 
                 <span className={`text-[10px] font-extrabold px-2.5 py-0.5 rounded-full border flex items-center gap-1 ${

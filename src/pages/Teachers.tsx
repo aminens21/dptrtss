@@ -24,9 +24,69 @@ import {
   Info,
   Pencil,
   Trash2,
-  AlertTriangle
+  AlertTriangle,
+  ChevronDown
 } from 'lucide-react';
 import toast from 'react-hot-toast';
+
+const CollapsibleSpecialties: React.FC<{ specialties: string[]; SPORTS_MAP: Record<string, { name: string; icon: string }> }> = ({ specialties, SPORTS_MAP }) => {
+  const [isExpanded, setIsExpanded] = useState(false);
+  
+  if (specialties.length === 0) return null;
+  
+  if (specialties.length === 1) {
+    const spec = specialties[0];
+    const sportDetails = SPORTS_MAP[spec];
+    if (!sportDetails) return null;
+    return (
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-purple-50 text-purple-700 border border-purple-100 rounded-md font-bold text-[10px]" title="حكم معتمد">
+        <span>{sportDetails.icon}</span>
+        <span>{sportDetails.name} (حكم)</span>
+      </span>
+    );
+  }
+  
+  const firstSpec = specialties[0];
+  const firstSport = SPORTS_MAP[firstSpec];
+  const remainingCount = specialties.length - 1;
+  
+  return (
+    <div className="flex flex-col gap-1 items-start">
+      <div className="flex items-center gap-1.5">
+        {firstSport && (
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-purple-50 text-purple-700 border border-purple-100 rounded-md font-bold text-[10px]" title="حكم معتمد">
+            <span>{firstSport.icon}</span>
+            <span>{firstSport.name} (حكم)</span>
+          </span>
+        )}
+        <button
+          type="button"
+          onClick={() => setIsExpanded(!isExpanded)}
+          className="inline-flex items-center justify-center p-1 bg-purple-100 hover:bg-purple-200 text-purple-800 rounded-md transition-all cursor-pointer text-[10px] font-black shrink-0 gap-0.5"
+          title={isExpanded ? "إخفاء باقي التخصصات" : "عرض باقي التخصصات"}
+        >
+          <span className="text-[9px]">+{remainingCount}</span>
+          <ChevronDown className={`h-3 w-3 transform transition-transform duration-200 ${isExpanded ? 'rotate-180' : ''}`} />
+        </button>
+      </div>
+      
+      {isExpanded && (
+        <div className="flex flex-wrap gap-1 mt-1 p-1 bg-purple-50/50 border border-purple-100/50 rounded-lg animate-in slide-in-from-top-1 duration-150 max-w-[220px]">
+          {specialties.slice(1).map(spec => {
+            const sportDetails = SPORTS_MAP[spec];
+            if (!sportDetails) return null;
+            return (
+              <span key={spec} className="inline-flex items-center gap-1 px-2 py-0.5 bg-purple-50 text-purple-700 border border-purple-100 rounded-md font-bold text-[10px]" title="حكم معتمد">
+                <span>{sportDetails.icon}</span>
+                <span>{sportDetails.name} (حكم)</span>
+              </span>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+};
 
 export const Teachers: React.FC = () => {
   const { userProfile } = useAuth();
@@ -442,18 +502,7 @@ export const Teachers: React.FC = () => {
                         <div className="space-y-1.5 max-w-[240px]">
                           {/* Referee specialties */}
                           {specialties.length > 0 && (
-                            <div className="flex flex-wrap gap-1">
-                              {specialties.map(spec => {
-                                const sportDetails = SPORTS_MAP[spec];
-                                if (!sportDetails) return null;
-                                return (
-                                  <span key={spec} className="inline-flex items-center gap-1 px-2 py-0.5 bg-purple-50 text-purple-700 border border-purple-100 rounded-md font-bold text-[10px]" title="حكم معتمد">
-                                    <span>{sportDetails.icon}</span>
-                                    <span>{sportDetails.name} (حكم)</span>
-                                  </span>
-                                );
-                              })}
-                            </div>
+                            <CollapsibleSpecialties specialties={specialties} SPORTS_MAP={SPORTS_MAP} />
                           )}
 
                           {/* Committee Head */}

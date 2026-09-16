@@ -114,33 +114,38 @@ export interface OfficialLogos {
   frmssLogoHeight?: number;
 }
 
-export const getAgeCategoriesForSeason = (season: string) => {
+export const getAgeCategoriesForSeason = (season: string, gender?: 'Male' | 'Female') => {
   const match = season.match(/(\d{4})/);
   const startYear = match ? parseInt(match[1], 10) : 2026;
+
+  const u12Label = gender === 'Female' ? 'البرعمات (إناث)' : gender === 'Male' ? 'البراعم (ذكور)' : 'البراعم والبرعمات';
+  const u15Label = gender === 'Female' ? 'الصغيرات (إناث)' : gender === 'Male' ? 'الصغار (ذكور)' : 'الصغار والصغيرات';
+  const u18Label = gender === 'Female' ? 'الفتيات (إناث)' : gender === 'Male' ? 'الفتيان (ذكور)' : 'الفتيان والفتيات';
+  const u20Label = gender === 'Female' ? 'الشابات (إناث)' : gender === 'Male' ? 'الشبان (ذكور)' : 'الشبان والشابات';
 
   return [
     { 
       id: 'U12', 
-      name: `البراعم / البرعمات - مواليد ${startYear - 11} وما بعد`, 
-      shortName: `البراعم / البرعمات - مواليد ${startYear - 11} وما بعد`, 
+      name: `${u12Label} - مواليد ${startYear - 11} وما بعد`, 
+      shortName: u12Label, 
       years: Array.from({ length: 15 }, (_, i) => startYear - 11 + i)
     },
     { 
       id: 'U15', 
-      name: `الصغار / الصغيرات - مواليد ${startYear - 14}/${startYear - 13}/${startYear - 12}`, 
-      shortName: `الصغار / الصغيرات - مواليد ${startYear - 14}/${startYear - 13}/${startYear - 12}`, 
+      name: `${u15Label} - مواليد ${startYear - 14}/${startYear - 13}/${startYear - 12}`, 
+      shortName: u15Label, 
       years: [startYear - 14, startYear - 13, startYear - 12] 
     },
     { 
       id: 'U18', 
-      name: `الفتيان / الفتيات - مواليد ${startYear - 17}/${startYear - 16}/${startYear - 15}`, 
-      shortName: `الفتيان / الفتيات - مواليد ${startYear - 17}/${startYear - 16}/${startYear - 15}`, 
+      name: `${u18Label} - مواليد ${startYear - 17}/${startYear - 16}/${startYear - 15}`, 
+      shortName: u18Label, 
       years: [startYear - 17, startYear - 16, startYear - 15] 
     },
     { 
       id: 'U20', 
-      name: `الشبان / الشابات - مواليد ${startYear - 17} وما بعد`, 
-      shortName: `الشبان / الشابات - مواليد ${startYear - 17} وما بعد`, 
+      name: `${u20Label} - مواليد ${startYear - 17} وما بعد`, 
+      shortName: u20Label, 
       years: Array.from({ length: 15 }, (_, i) => startYear - 17 + i)
     }
   ];
@@ -157,6 +162,31 @@ export function normalizeCategoryKey(catStr: string): string {
   return catStr;
 }
 
+export function getCategoryShortName(category: string, gender?: string): string {
+  const normKey = normalizeCategoryKey(category);
+  if (normKey === 'U12') {
+    if (gender === 'Female' || gender === 'إناث') return 'البرعمات';
+    if (gender === 'Male' || gender === 'ذكور') return 'البراعم';
+    return 'البراعم والبرعمات';
+  }
+  if (normKey === 'U15') {
+    if (gender === 'Female' || gender === 'إناث') return 'الصغيرات';
+    if (gender === 'Male' || gender === 'ذكور') return 'الصغار';
+    return 'الصغار والصغيرات';
+  }
+  if (normKey === 'U18') {
+    if (gender === 'Female' || gender === 'إناث') return 'الفتيات';
+    if (gender === 'Male' || gender === 'ذكور') return 'الفتيان';
+    return 'الفتيان والفتيات';
+  }
+  if (normKey === 'U20') {
+    if (gender === 'Female' || gender === 'إناث') return 'الشابات';
+    if (gender === 'Male' || gender === 'ذكور') return 'الشبان';
+    return 'الشبان والشابات';
+  }
+  return category;
+}
+
 export function getCategoryGenderLabel(category: string, gender?: string, season: string = '2026/2027'): string {
   const normKey = normalizeCategoryKey(category);
   const match = season.match(/(\d{4})/);
@@ -168,24 +198,24 @@ export function getCategoryGenderLabel(category: string, gender?: string, season
   const u20Years = ` - مواليد ${startYear - 17} وما بعد`;
 
   if (normKey === 'U12') {
-    if (gender === 'Female' || gender === 'إناث') return `البرعمات${u12Years}`;
-    if (gender === 'Male' || gender === 'ذكور') return `البراعم${u12Years}`;
-    return `البراعم / البرعمات${u12Years}`;
+    if (gender === 'Female' || gender === 'إناث') return `البرعمات (إناث)${u12Years}`;
+    if (gender === 'Male' || gender === 'ذكور') return `البراعم (ذكور)${u12Years}`;
+    return `البراعم والبرعمات${u12Years}`;
   }
   if (normKey === 'U15') {
-    if (gender === 'Female' || gender === 'إناث') return `الصغيرات${u15Years}`;
-    if (gender === 'Male' || gender === 'ذكور') return `الصغار${u15Years}`;
-    return `الصغار / الصغيرات${u15Years}`;
+    if (gender === 'Female' || gender === 'إناث') return `الصغيرات (إناث)${u15Years}`;
+    if (gender === 'Male' || gender === 'ذكور') return `الصغار (ذكور)${u15Years}`;
+    return `الصغار والصغيرات${u15Years}`;
   }
   if (normKey === 'U18') {
-    if (gender === 'Female' || gender === 'إناث') return `الفتيات${u18Years}`;
-    if (gender === 'Male' || gender === 'ذكور') return `الفتيان${u18Years}`;
-    return `الفتيان / الفتيات${u18Years}`;
+    if (gender === 'Female' || gender === 'إناث') return `الفتيات (إناث)${u18Years}`;
+    if (gender === 'Male' || gender === 'ذكور') return `الفتيان (ذكور)${u18Years}`;
+    return `الفتيان والفتيات${u18Years}`;
   }
   if (normKey === 'U20') {
-    if (gender === 'Female' || gender === 'إناث') return `الشابات${u20Years}`;
-    if (gender === 'Male' || gender === 'ذكور') return `الشبان${u20Years}`;
-    return `الشبان / الشابات${u20Years}`;
+    if (gender === 'Female' || gender === 'إناث') return `الشابات (إناث)${u20Years}`;
+    if (gender === 'Male' || gender === 'ذكور') return `الشبان (ذكور)${u20Years}`;
+    return `الشبان والشابات${u20Years}`;
   }
   return category;
 }
@@ -195,9 +225,9 @@ export const AGE_CATEGORIES = getAgeCategoriesForSeason('2026/2027');
 export const isClubTournament = (t?: { affiliationType?: string; name?: string } | null): boolean => {
   if (!t) return false;
   if (t.affiliationType === 'non_club') return false;
-  if (t.name && (t.name.includes('غير المنتمين') || t.name.includes('لغير المنتمين'))) return false;
+  if (t.name && (t.name.includes('غير المنتمين') || t.name.includes('لغير المنتمين') || t.name.includes('لا منتمي') || t.name.includes('لا منتمين'))) return false;
   if (t.affiliationType === 'club_affiliated') return true;
-  if (t.name && (t.name.includes('للمنتمين للأندية') || t.name.includes('المنتمين للأندية') || t.name.includes('عصب وأندية'))) return true;
+  if (t.name && (t.name.includes('للمنتمين للأندية') || t.name.includes('المنتمين للأندية') || t.name.includes('عصب وأندية') || t.name.includes('منتمي لنادي'))) return true;
   return false;
 };
 
@@ -617,7 +647,19 @@ export const DataService = {
       if (!snap.empty) {
         const firestoreList = snap.docs
           .map(d => ({ id: d.id, ...d.data() } as School))
-          .filter(s => s && s.name && !s.name.includes('الكندي') && !s.name.includes('غير محدد'));
+          .filter(s => s && s.name && !s.name.includes('الكندي') && !s.name.includes('غير محدد') && s.name.trim() !== 'ثانوية المغرب العربي التأهيلية');
+        
+        // Auto-clean any document with name 'ثانوية المغرب العربي التأهيلية'
+        const duplicateDocs = snap.docs.filter(d => {
+          const name = d.data()?.name?.trim();
+          return name === 'ثانوية المغرب العربي التأهيلية';
+        });
+        if (duplicateDocs.length > 0) {
+          duplicateDocs.forEach(d => {
+            deleteDoc(doc(db, 'schools', d.id)).catch(err => console.warn("Failed to delete duplicate school doc:", err));
+          });
+        }
+
         setLocal(STORAGE_KEYS.SCHOOLS, firestoreList);
         return firestoreList;
       } else {
@@ -628,7 +670,7 @@ export const DataService = {
     } catch (e) {
       console.warn("Firestore schools fetch error:", e);
       const localList = getLocal<School>(STORAGE_KEYS.SCHOOLS, []);
-      return localList.filter(s => s && s.name && !s.name.includes('الكندي') && !s.name.includes('غير محدد'));
+      return localList.filter(s => s && s.name && !s.name.includes('الكندي') && !s.name.includes('غير محدد') && s.name.trim() !== 'ثانوية المغرب العربي التأهيلية');
     }
   },
 
@@ -637,7 +679,7 @@ export const DataService = {
       const unsubscribe = onSnapshot(collection(db, 'schools'), (snap) => {
         const firestoreList = snap.docs
           .map(d => ({ id: d.id, ...d.data() } as School))
-          .filter(s => s && s.name && !s.name.includes('الكندي') && !s.name.includes('غير محدد'));
+          .filter(s => s && s.name && !s.name.includes('الكندي') && !s.name.includes('غير محدد') && s.name.trim() !== 'ثانوية المغرب العربي التأهيلية');
         setLocal(STORAGE_KEYS.SCHOOLS, firestoreList);
         callback(firestoreList);
       }, (err) => {
@@ -662,7 +704,7 @@ export const DataService = {
       id: tempId
     };
     const localList = getLocal<School>(STORAGE_KEYS.SCHOOLS, []);
-    const filtered = localList.filter(s => s.id !== tempId);
+    const filtered = localList.filter(s => s.id !== tempId && s.name?.trim() !== 'ثانوية المغرب العربي التأهيلية');
     const updated = [newSchool, ...filtered];
     setLocal(STORAGE_KEYS.SCHOOLS, updated);
 
@@ -675,7 +717,7 @@ export const DataService = {
       newSchool.id = realId;
 
       const currentList = getLocal<School>(STORAGE_KEYS.SCHOOLS, []);
-      const synced = currentList.map(s => s.id === tempId ? { ...s, id: realId } : s);
+      const synced = currentList.map(s => s.id === tempId ? { ...s, id: realId } : s).filter(s => s.name?.trim() !== 'ثانوية المغرب العربي التأهيلية');
       setLocal(STORAGE_KEYS.SCHOOLS, synced);
     } catch (e) {
       console.warn("Saved school locally:", e);
@@ -685,7 +727,7 @@ export const DataService = {
 
   async updateSchool(id: string, updates: Partial<School>): Promise<void> {
     const localList = getLocal<School>(STORAGE_KEYS.SCHOOLS, []);
-    const updated = localList.map(s => s.id === id ? { ...s, ...updates } : s);
+    const updated = localList.map(s => s.id === id ? { ...s, ...updates } : s).filter(s => s.name?.trim() !== 'ثانوية المغرب العربي التأهيلية');
     setLocal(STORAGE_KEYS.SCHOOLS, updated);
 
     try {

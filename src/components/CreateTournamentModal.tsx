@@ -234,8 +234,8 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
 
       if (sportId === 'cross_country') {
         for (const aff of affiliationsToGenerate) {
-          const affSuffix = aff === 'non_club' ? ' - لغير المنتمين للأندية' : ' - للمنتمين للأندية';
-          const affLabel = aff === 'non_club' ? 'لغير المنتمين للأندية' : 'للمنتمين للأندية';
+          const affSuffix = aff === 'non_club' ? ' - لا منتمين' : ' - للمنتمين للأندية';
+          const affLabel = aff === 'non_club' ? 'لا منتمين' : 'للمنتمين للأندية';
 
           tournamentsBatch.push({
             name: `${name.trim() || `البطولة الإقليمية المدرسية للعدو الريفي - ${activeDirObj?.name || ''}`}${affSuffix}`,
@@ -260,8 +260,8 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
             const genderCatName = getCategoryGenderLabel(catId, gen);
 
             for (const aff of affiliationsToGenerate) {
-              const affSuffix = aff === 'non_club' ? ' - لغير المنتمين للأندية' : ' - للمنتمين للأندية';
-              const affLabel = aff === 'non_club' ? 'لغير المنتمين للأندية' : 'للمنتمين للأندية';
+              const affSuffix = aff === 'non_club' ? ' - لا منتمين' : ' - للمنتمين للأندية';
+              const affLabel = aff === 'non_club' ? 'لا منتمين' : 'للمنتمين للأندية';
               
               // Formulate distinct tournament name with affiliation
               const finalTournamentName = `${name.trim()} - ${genderCatName}${affSuffix}`;
@@ -585,7 +585,7 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
                   <p className={`text-[10px] leading-tight ${
                     affiliationSelection === 'both' ? 'text-blue-100' : 'text-slate-500'
                   }`}>
-                    توليد بطولتين منفصلتين (لغير المنتمين + للمنتمين للأندية)
+                    توليد بطولتين منفصلتين (لا منتمين + للمنتمين للأندية)
                   </p>
                 </div>
               </button>
