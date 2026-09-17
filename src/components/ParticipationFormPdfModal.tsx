@@ -36,6 +36,7 @@ interface ParticipationFormPdfModalProps {
   students: Student[];
   preselectedCategory?: string;
   preselectedGender?: 'Male' | 'Female' | 'ALL';
+  preselectedAffiliation?: 'non_club' | 'club_affiliated' | 'ALL';
 }
 
 export const ParticipationFormPdfModal: React.FC<ParticipationFormPdfModalProps> = ({
@@ -49,10 +50,12 @@ export const ParticipationFormPdfModal: React.FC<ParticipationFormPdfModalProps>
   teacher,
   students,
   preselectedCategory = 'ALL',
-  preselectedGender = 'ALL'
+  preselectedGender = 'ALL',
+  preselectedAffiliation = 'ALL'
 }) => {
   const [selectedCategory, setSelectedCategory] = useState<string>(preselectedCategory);
   const [selectedGender, setSelectedGender] = useState<'Male' | 'Female' | 'ALL'>(preselectedGender);
+  const [selectedAffiliation, setSelectedAffiliation] = useState<'non_club' | 'club_affiliated' | 'ALL'>(preselectedAffiliation);
   const [selectedCoachFilter, setSelectedCoachFilter] = useState<string>('ALL');
   const [isGenerating, setIsGenerating] = useState(false);
   const printAreaRef = useRef<HTMLDivElement>(null);
@@ -71,10 +74,11 @@ export const ParticipationFormPdfModal: React.FC<ParticipationFormPdfModalProps>
       if (!st) return false;
       const matchCat = selectedCategory === 'ALL' || (st.category && st.category.toUpperCase() === selectedCategory.toUpperCase());
       const matchGen = selectedGender === 'ALL' || st.gender === selectedGender;
+      const matchAff = selectedAffiliation === 'ALL' || st.affiliationType === selectedAffiliation;
       const matchCoach = selectedCoachFilter === 'ALL' || st.coachName === selectedCoachFilter;
-      return matchCat && matchGen && matchCoach;
+      return matchCat && matchGen && matchAff && matchCoach;
     });
-  }, [students, selectedCategory, selectedGender, selectedCoachFilter]);
+  }, [students, selectedCategory, selectedGender, selectedAffiliation, selectedCoachFilter]);
 
   // Derive the best matching coach for the selected filter / category / gender
   const activeCoachFromStudents = useMemo(() => {
@@ -288,6 +292,20 @@ export const ParticipationFormPdfModal: React.FC<ParticipationFormPdfModalProps>
                 <option value="ALL">الكل (ذكور وإناث)</option>
                 <option value="Male">ذكور فقط</option>
                 <option value="Female">إناث فقط</option>
+              </select>
+            </div>
+
+            {/* Affiliation Filter */}
+            <div className="flex items-center gap-1.5">
+              <span className="font-bold text-slate-600">الانتماء:</span>
+              <select
+                className="px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-bold text-slate-700 shadow-3xs"
+                value={selectedAffiliation}
+                onChange={(e) => setSelectedAffiliation(e.target.value as any)}
+              >
+                <option value="ALL">الكل</option>
+                <option value="non_club">اللامنتمين (مدرسي فقط)</option>
+                <option value="club_affiliated">المنتمين (للأندية)</option>
               </select>
             </div>
 

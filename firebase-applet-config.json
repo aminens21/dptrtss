@@ -1,12 +1,9 @@
 {
-  "projectId": "peppy-buckeye-dthv3",
-  "appId": "1:249586447807:web:4cb289b9752ee47de6dd0a",
-  "apiKey": "AIzaSyCew0KYXyt9Ny71YWJk3Fu0Qq1sP0sFHBg",
-  "authDomain": "peppy-buckeye-dthv3.firebaseapp.com",
-  "firestoreDatabaseId": "ai-studio-remix-7121cace-d698-4fcc-a2f2-615759c807db",
-  "storageBucket": "peppy-buckeye-dthv3.firebasestorage.app",
-  "messagingSenderId": "249586447807",
-  "measurementId": "",
-  "oAuthClientId": "249586447807-5ln8ofal51fkjsacrhcujnrncj71otfh.apps.googleusercontent.com",
-  "recaptchaSiteKey": ""
+  "projectId": "dptrtss-v2",
+  "appId": "1:101843765424:web:ae13ef3b3f661ca6d09375",
+  "apiKey": "AIzaSyBgXSf0mNdOzeWzhGbmfP6BxqeQNuZ0ejc",
+  "authDomain": "dptrtss-v2.firebaseapp.com",
+  "storageBucket": "dptrtss-v2.firebasestorage.app",
+  "messagingSenderId": "101843765424",
+  "locationId": "europe-west3"
 }

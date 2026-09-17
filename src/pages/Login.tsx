@@ -210,11 +210,13 @@ export const Login: React.FC = () => {
     } catch (error: any) {
       console.error("Google sign in error:", error);
       if (error?.code === 'auth/popup-closed-by-user') {
-        toast.error('تم إغلاق نافذة تسجيل الدخول');
+        toast.error('تم إغلاق نافذة تسجيل الدخول قبل إتمام العملية');
+      } else if (error?.code === 'auth/unauthorized-domain') {
+        toast.error('هذا النطاق (Domain) غير مصرح له بتسجيل الدخول في إعدادات Firebase. يرجى إضافة dptrtss.aminens21.workers.dev في قائمة Authorized Domains.');
       } else if (error?.code === 'auth/cancelled-popup-request') {
-        // user clicked again or cancelled
+        // user clicked again
       } else {
-        toast.error('حدث خطأ أثناء الاتصال بحساب Google. يرجى المحاولة مرة أخرى.');
+        toast.error('حدث خطأ في الاتصال بـ Google. تأكد من تفعيل "Google Sign-In" في وحدة تحكم Firebase.');
       }
     } finally {
       setIsSubmitting(false);

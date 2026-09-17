@@ -166,13 +166,15 @@ export const TeacherTeams: React.FC = () => {
       // For teachers, strictly lock school to their registered workLocation
       const targetSchool = isTeacher ? userProfile?.workLocation : (userProfile?.workLocation || urlSchool);
       if (targetSchool) {
-        const matched = dirSchools.find(s => 
-          s.name && (
-            s.name.trim().toLowerCase() === targetSchool.trim().toLowerCase() ||
-            s.name.includes(targetSchool) ||
-            targetSchool.includes(s.name)
-          )
-        );
+        const targetStr = String(targetSchool).trim().toLowerCase();
+        const matched = dirSchools.find(s => {
+          const sName = String(s.name || '').trim().toLowerCase();
+          return sName && (
+            sName === targetStr ||
+            sName.includes(targetStr) ||
+            targetStr.includes(sName)
+          );
+        });
         if (matched) {
           setSelectedSchoolId(matched.id);
         } else if (dirSchools.length > 0) {
@@ -399,13 +401,15 @@ export const TeacherTeams: React.FC = () => {
     if (!userProfile) return false;
     
     // 1. Check unique lease number if both have it
-    if (student.coachLeaseNumber && userProfile.leaseNumber && student.coachLeaseNumber.trim() === userProfile.leaseNumber.trim()) {
+    const sLease = String(student.coachLeaseNumber || '').trim();
+    const uLease = String(userProfile.leaseNumber || '').trim();
+    if (sLease && uLease && sLease === uLease) {
       return true;
     }
     
     // 2. Check trimmed case-insensitive school names
-    const cleanStudentSchool = (student.schoolName || '').trim().toLowerCase();
-    const cleanTeacherSchool = (userProfile.workLocation || '').trim().toLowerCase();
+    const cleanStudentSchool = String(student.schoolName || '').trim().toLowerCase();
+    const cleanTeacherSchool = String(userProfile.workLocation || '').trim().toLowerCase();
     if (cleanStudentSchool && cleanTeacherSchool && cleanStudentSchool === cleanTeacherSchool) {
       return true;
     }
@@ -718,8 +722,13 @@ export const TeacherTeams: React.FC = () => {
   const displayedSportStudents = useMemo(() => {
     return activeSportStudents.filter(s => {
       if (selectedCategoryKey) {
-        const [catId, g] = selectedCategoryKey.split('_');
+        const parts = selectedCategoryKey.split('_');
+        const catId = parts[0];
+        const g = parts[1];
+        const aff = parts[2];
+        
         if (s.category !== catId || s.gender !== g) return false;
+        if (aff && s.affiliationType !== aff) return false;
       } else {
         // If no category card is selected, do not display any student list
         return false;
@@ -734,7 +743,11 @@ export const TeacherTeams: React.FC = () => {
     // First, fill using the existing student data (from DB)
     activeSportStudents.forEach(s => {
       const normCat = normalizeCategoryKey(s.category);
-      const key = `${normCat}_${s.gender}`;
+      // For cross country, we might want to split coaches by affiliation if we split cards
+      const key = (selectedSportId === 'cross_country' && s.affiliationType)
+        ? `${normCat}_${s.gender}_${s.affiliationType}`
+        : `${normCat}_${s.gender}`;
+        
       if (s.coachName && !coaches[key]) {
         coaches[key] = {
           coachName: s.coachName,
@@ -752,7 +765,7 @@ export const TeacherTeams: React.FC = () => {
     });
 
     return coaches;
-  }, [activeSportStudents, predefinedCoaches]);
+  }, [activeSportStudents, predefinedCoaches, selectedSportId]);
 
   // Active Sport Configuration
   const activeSportConfig = sportsConfig.find(s => s.id === selectedSportId);
@@ -1526,29 +1539,47 @@ export const TeacherTeams: React.FC = () => {
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {(() => {
-                  const allItems = activeSportCategories.flatMap(catId => [
-                    { catId, gender: 'Male' as const, label: getCategoryLabel(catId, 'Male') },
-                    { catId, gender: 'Female' as const, label: getCategoryLabel(catId, 'Female') }
-                  ]);
+                  const allItems: { catId: string; gender: 'Male' | 'Female'; affiliationType?: string; label: string }[] = [];
+                  
+                  activeSportCategories.forEach(catId => {
+                    if (selectedSportId === 'cross_country') {
+                      allItems.push({ catId, gender: 'Male', affiliationType: 'non_club', label: `${getCategoryLabel(catId, 'Male')} (اللامنتمين)` });
+                      allItems.push({ catId, gender: 'Male', affiliationType: 'club_affiliated', label: `${getCategoryLabel(catId, 'Male')} (المنتمين)` });
+                      allItems.push({ catId, gender: 'Female', affiliationType: 'non_club', label: `${getCategoryLabel(catId, 'Female')} (اللامنتميات)` });
+                      allItems.push({ catId, gender: 'Female', affiliationType: 'club_affiliated', label: `${getCategoryLabel(catId, 'Female')} (المنتميات)` });
+                    } else {
+                      allItems.push({ catId, gender: 'Male', label: getCategoryLabel(catId, 'Male') });
+                      allItems.push({ catId, gender: 'Female', label: getCategoryLabel(catId, 'Female') });
+                    }
+                  });
                   
                   const filteredItems = activeSportStudents.length > 0
                     ? allItems.filter(item => 
-                        activeSportStudents.some(s => s.category === item.catId && s.gender === item.gender)
+                        activeSportStudents.some(s => 
+                          s.category === item.catId && 
+                          s.gender === item.gender && 
+                          (!item.affiliationType || s.affiliationType === item.affiliationType)
+                        )
                       )
                     : allItems;
 
                   return filteredItems.length > 0 ? filteredItems : allItems;
-                })().map(({ catId, gender: g, label }) => {
-                  const key = `${catId}_${g}`;
+                })().map((item) => {
+                  const { catId, gender: g, label, affiliationType: aff } = item;
+                  const key = aff ? `${catId}_${g}_${aff}` : `${catId}_${g}`;
                   const currentCoach = effectiveCoaches[key] || {
                     coachName: userProfile?.fullName || '',
                     coachLeaseNumber: userProfile?.leaseNumber || '',
                     coachPhone: userProfile?.phone || ''
                   };
-                  const matchingStudents = activeSportStudents.filter(s => s.category === catId && s.gender === g);
+                  const matchingStudents = activeSportStudents.filter(s => 
+                    s.category === catId && 
+                    s.gender === g &&
+                    (!aff || s.affiliationType === aff)
+                  );
                   const isEditing = editingCoachKey === key;
                   const isSelected = selectedCategoryKey === key;
-                  const isCategoryClub = matchingStudents.some(s => s.affiliationType === 'club_affiliated');
+                  const isCategoryClub = aff === 'club_affiliated' || (!aff && matchingStudents.some(s => s.affiliationType === 'club_affiliated'));
 
                   const cardStyle = isCategoryClub
                     ? `${isSelected ? 'bg-amber-100/90 border-amber-500 ring-2 ring-amber-400 shadow-md scale-[1.01]' : 'bg-amber-50 border-amber-300 hover:bg-amber-100/40 hover:border-amber-400 hover:shadow-sm shadow-3xs'}`
@@ -1594,7 +1625,13 @@ export const TeacherTeams: React.FC = () => {
                                   for (const s of matchingStudents) {
                                     await DataService.deleteStudent(s.id);
                                   }
-                                  setStudents(prev => prev.filter(s => !(s.sportId === selectedSportId && s.category === catId && s.gender === g)));
+                                  setStudents(prev => prev.filter(s => {
+                                    const match = s.sportId === selectedSportId && s.category === catId && s.gender === g;
+                                    if (match && aff) {
+                                      return s.affiliationType !== aff;
+                                    }
+                                    return !match;
+                                  }));
                                   setPredefinedCoaches(prev => {
                                     const next = { ...prev };
                                     delete next[key];
@@ -1637,8 +1674,8 @@ export const TeacherTeams: React.FC = () => {
                                 type="button"
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  const defaultAff = isCategoryClub ? 'club_affiliated' : 'non_club';
-                                  handleOpenNewStudentForm(catId, g, defaultAff);
+                                  const defaultAff = aff || (isCategoryClub ? 'club_affiliated' : 'non_club');
+                                  handleOpenNewStudentForm(catId, g, defaultAff as any);
                                 }}
                                 className="text-[10px] text-green-700 hover:text-green-900 font-extrabold flex items-center gap-1 px-2 py-1 rounded bg-green-50 border border-green-200 cursor-pointer transition-colors shadow-3xs"
                               >
@@ -1716,7 +1753,11 @@ export const TeacherTeams: React.FC = () => {
                                 }));
 
                                 // Propagate updates to all existing students in this category/gender combo
-                                const studentsToUpdate = activeSportStudents.filter(s => s.category === catId && s.gender === g);
+                                const studentsToUpdate = activeSportStudents.filter(s => 
+                                  s.category === catId && 
+                                  s.gender === g &&
+                                  (!aff || s.affiliationType === aff)
+                                );
                                 if (studentsToUpdate.length > 0) {
                                   try {
                                     const updates = {
@@ -1728,7 +1769,9 @@ export const TeacherTeams: React.FC = () => {
                                       DataService.updateStudent(s.id, updates)
                                     ));
                                     setStudents(prev => prev.map(s => {
-                                      if (s.sportId === selectedSportId && s.category === catId && s.gender === g) {
+                                      const match = s.sportId === selectedSportId && s.category === catId && s.gender === g;
+                                      const affMatch = !aff || s.affiliationType === aff;
+                                      if (match && affMatch) {
                                         return { ...s, ...updates };
                                       }
                                       return s;
@@ -1783,7 +1826,15 @@ export const TeacherTeams: React.FC = () => {
                       <span>لائحة التلاميذ المسجلين في فئة:</span>
                       <span className="text-amber-800 bg-amber-50 px-2.5 py-0.5 rounded-lg border border-amber-200 font-extrabold text-[11px] flex items-center gap-1 shadow-3xs">
                         <span>🏷️</span>
-                        <span>{getCategoryLabel(selectedCategoryKey.split('_')[0], selectedCategoryKey.split('_')[1])}</span>
+                        <span>
+                          {getCategoryLabel(selectedCategoryKey.split('_')[0], selectedCategoryKey.split('_')[1])}
+                          {selectedCategoryKey.split('_')[2] && (
+                            ` (${selectedCategoryKey.split('_')[2] === 'club_affiliated' 
+                              ? (selectedCategoryKey.split('_')[1] === 'Female' ? 'المنتميات' : 'المنتمين')
+                              : (selectedCategoryKey.split('_')[1] === 'Female' ? 'اللامنتميات' : 'اللامنتمين')
+                            })`
+                          )}
+                        </span>
                       </span>
                       <span className="text-slate-400 font-normal">({displayedSportStudents.length} تلاميذ)</span>
                     </h4>
@@ -2161,6 +2212,7 @@ export const TeacherTeams: React.FC = () => {
           regionName={activeDirectorateObj?.regionName}
           preselectedCategory={selectedCategoryKey ? selectedCategoryKey.split('_')[0] : undefined}
           preselectedGender={selectedCategoryKey ? selectedCategoryKey.split('_')[1] as 'Male' | 'Female' : undefined}
+          preselectedAffiliation={selectedCategoryKey ? selectedCategoryKey.split('_')[2] as 'non_club' | 'club_affiliated' : undefined}
         />
       )}
     </div>

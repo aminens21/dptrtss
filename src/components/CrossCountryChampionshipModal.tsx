@@ -44,9 +44,13 @@ import {
   Plus,
   Trash2,
   Save,
-  Info
+  Info,
+  Grid,
+  Table,
+  CreditCard
 } from 'lucide-react';
 import toast from 'react-hot-toast';
+import { downloadIndividualCardPdf } from '../lib/participationPdfService';
 
 interface CrossCountryChampionshipModalProps {
   isOpen: boolean;
@@ -77,6 +81,7 @@ export const CrossCountryChampionshipModal: React.FC<CrossCountryChampionshipMod
   const [searchQuery, setSearchQuery] = useState('');
   const [filterType, setFilterType] = useState<'ALL' | 'school_team' | 'individual'>('ALL');
   const [filterSchool, setFilterSchool] = useState<string>('ALL');
+  const [participantsViewMode, setParticipantsViewMode] = useState<'table' | 'cards'>('table');
   const [isRegisterModalOpen, setIsRegisterModalOpen] = useState(false);
   const [isEditDeadlineOpen, setIsEditDeadlineOpen] = useState(false);
   const [isPdfModalOpen, setIsPdfModalOpen] = useState(false);
@@ -1071,6 +1076,23 @@ export const CrossCountryChampionshipModal: React.FC<CrossCountryChampionshipMod
                   </div>
 
                   <div className="flex items-center gap-2 w-full sm:w-auto">
+                    <div className="flex items-center bg-white border border-slate-200 rounded-lg p-0.5 shadow-3xs">
+                      <button
+                        onClick={() => setParticipantsViewMode('table')}
+                        className={`p-1.5 rounded-md transition-all ${participantsViewMode === 'table' ? 'bg-blue-100 text-blue-700' : 'text-slate-400 hover:text-slate-600'}`}
+                        title="عرض الجدول"
+                      >
+                        <Table className="h-4 w-4" />
+                      </button>
+                      <button
+                        onClick={() => setParticipantsViewMode('cards')}
+                        className={`p-1.5 rounded-md transition-all ${participantsViewMode === 'cards' ? 'bg-blue-100 text-blue-700' : 'text-slate-400 hover:text-slate-600'}`}
+                        title="عرض البطاقات"
+                      >
+                        <Grid className="h-4 w-4" />
+                      </button>
+                    </div>
+
                     <select
                       value={filterType}
                       onChange={(e) => setFilterType(e.target.value as any)}
@@ -1106,81 +1128,171 @@ export const CrossCountryChampionshipModal: React.FC<CrossCountryChampionshipMod
                   </div>
 
                   {filteredParticipants.length > 0 ? (
-                    <div className="overflow-x-auto">
-                      <table className="w-full text-right text-xs">
-                        <thead className="bg-slate-100/80 text-slate-600 border-b border-slate-200 font-bold">
-                          <tr>
-                            <th className="py-2.5 px-3 text-center w-12">#</th>
-                            <th className="py-2.5 px-3">العداء(ة)</th>
-                            <th className="py-2.5 px-3">رقم مسار</th>
-                            <th className="py-2.5 px-3">المؤسسة التعليمية</th>
-                            <th className="py-2.5 px-3 text-center">نوع المشاركة</th>
-                            <th className="py-2.5 px-3 text-center">المسافة</th>
-                            <th className="py-2.5 px-3 text-center">تاريخ الازدياد</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-100">
-                          {filteredParticipants.map((runner, index) => (
-                            <tr key={runner.id || `runner-${index}`} className="hover:bg-blue-50/40 transition-colors">
-                              <td className="py-2.5 px-3 text-center font-bold text-slate-400">
-                                {index + 1}
-                              </td>
-                              <td className="py-2.5 px-3">
-                                <div className="flex items-center gap-2.5">
-                                  {runner.photoUrl ? (
-                                    <img
-                                      src={runner.photoUrl}
-                                      alt={runner.fullName}
-                                      className="w-8 h-8 rounded-full object-cover border border-slate-200 shrink-0"
-                                      referrerPolicy="no-referrer"
-                                    />
-                                  ) : (
-                                    <div className="w-8 h-8 rounded-full bg-slate-100 border border-slate-200 flex items-center justify-center text-xs font-bold text-slate-600 shrink-0">
-                                      {runner.gender === 'Male' ? '🏃‍♂️' : '🏃‍♀️'}
-                                    </div>
-                                  )}
-                                  <div>
-                                    <div className="font-black text-slate-900 text-xs">{runner.fullName}</div>
-                                    <div className="text-[10px] text-slate-400 font-medium">
-                                      {runner.gender === 'Male' ? 'تلميذ (ذكر)' : 'تلميذة (أنثى)'}
+                    participantsViewMode === 'table' ? (
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-right text-xs">
+                          <thead className="bg-slate-100/80 text-slate-600 border-b border-slate-200 font-bold">
+                            <tr>
+                              <th className="py-2.5 px-3 text-center w-12">#</th>
+                              <th className="py-2.5 px-3">العداء(ة)</th>
+                              <th className="py-2.5 px-3">رقم مسار</th>
+                              <th className="py-2.5 px-3">المؤسسة التعليمية</th>
+                              <th className="py-2.5 px-3 text-center">نوع المشاركة</th>
+                              <th className="py-2.5 px-3 text-center">المسافة</th>
+                              <th className="py-2.5 px-3 text-center">تاريخ الازدياد</th>
+                              <th className="py-2.5 px-3 text-center">الإجراء</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100">
+                            {filteredParticipants.map((runner, index) => (
+                              <tr key={runner.id || `runner-${index}`} className={`transition-colors ${runner.participationType === 'individual' ? 'bg-amber-50/20 hover:bg-amber-100/30' : 'hover:bg-blue-50/40'}`}>
+                                <td className="py-2.5 px-3 text-center font-bold text-slate-400">
+                                  {index + 1}
+                                </td>
+                                <td className="py-2.5 px-3">
+                                  <div className="flex items-center gap-2.5">
+                                    {runner.photoUrl ? (
+                                      <img
+                                        src={runner.photoUrl}
+                                        alt={runner.fullName}
+                                        className="w-8 h-8 rounded-full object-cover border border-slate-200 shrink-0"
+                                        referrerPolicy="no-referrer"
+                                      />
+                                    ) : (
+                                      <div className="w-8 h-8 rounded-full bg-slate-100 border border-slate-200 flex items-center justify-center text-xs font-bold text-slate-600 shrink-0">
+                                        {runner.gender === 'Male' ? '🏃‍♂️' : '🏃‍♀️'}
+                                      </div>
+                                    )}
+                                    <div>
+                                      <div className="font-black text-slate-900 text-xs">{runner.fullName}</div>
+                                      <div className="text-[10px] text-slate-400 font-medium">
+                                        {runner.gender === 'Male' ? 'تلميذ (ذكر)' : 'تلميذة (أنثى)'}
+                                      </div>
                                     </div>
                                   </div>
-                                </div>
-                              </td>
-                              <td className="py-2.5 px-3 font-mono font-bold text-slate-700">
-                                {runner.massarNumber ? (
-                                  <span className="bg-slate-100 px-2 py-0.5 rounded border border-slate-200 text-blue-900">
-                                    {runner.massarNumber}
+                                </td>
+                                <td className="py-2.5 px-3 font-mono font-bold text-slate-700">
+                                  {runner.massarNumber ? (
+                                    <span className="bg-slate-100 px-2 py-0.5 rounded border border-slate-200 text-blue-900">
+                                      {runner.massarNumber}
+                                    </span>
+                                  ) : (
+                                    <span className="text-slate-300">—</span>
+                                  )}
+                                </td>
+                                <td className="py-2.5 px-3">
+                                  <div className="font-bold text-slate-800">{runner.schoolName}</div>
+                                </td>
+                                <td className="py-2.5 px-3 text-center whitespace-nowrap">
+                                  <span
+                                    className={`inline-flex px-2.5 py-0.5 rounded-full text-[10px] font-bold border ${
+                                      runner.participationType === 'school_team'
+                                        ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                        : 'bg-amber-50 text-amber-800 border-amber-200'
+                                    }`}
+                                  >
+                                    {runner.participationType === 'school_team' ? '👥 فريق المؤسسة' : '👤 مشاركة فردية'}
                                   </span>
+                                </td>
+                                <td className="py-2.5 px-3 text-center whitespace-nowrap font-bold text-blue-700">
+                                  {runner.distance || activeCategory.distance}
+                                </td>
+                                <td className="py-2.5 px-3 text-center whitespace-nowrap text-slate-500 font-mono text-[11px]">
+                                  {runner.birthDate || '—'}
+                                </td>
+                                <td className="py-2.5 px-3 text-center">
+                                  {runner.participationType === 'individual' && (
+                                    <button
+                                      onClick={() => downloadIndividualCardPdf(runner, { id: 'cross_country', name: 'العدو الريفي' }, activeSeason)}
+                                      className="p-1.5 text-blue-600 hover:bg-blue-100 rounded-lg transition-colors cursor-pointer"
+                                      title="تحميل بطاقة المشارك الفردية"
+                                    >
+                                      <CreditCard className="h-4 w-4" />
+                                    </button>
+                                  )}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    ) : (
+                      <div className="p-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 bg-slate-50/50">
+                        {filteredParticipants.map((runner, index) => (
+                          <div 
+                            key={runner.id || `runner-card-${index}`} 
+                            className={`bg-white rounded-xl border p-3 shadow-sm hover:shadow-md transition-all relative overflow-hidden group ${
+                              runner.participationType === 'individual' ? 'border-amber-200 bg-amber-50/10' : 'border-slate-200'
+                            }`}
+                          >
+                            {runner.participationType === 'individual' && (
+                              <div className="absolute top-0 left-0 bg-amber-500 text-white text-[9px] font-black px-2 py-0.5 rounded-br-lg uppercase tracking-tighter">
+                                Individual
+                              </div>
+                            )}
+                            
+                            <div className="flex gap-3">
+                              <div className="shrink-0 relative">
+                                {runner.photoUrl ? (
+                                  <img
+                                    src={runner.photoUrl}
+                                    alt={runner.fullName}
+                                    className="w-16 h-20 rounded-lg object-cover border border-slate-200"
+                                    referrerPolicy="no-referrer"
+                                  />
                                 ) : (
-                                  <span className="text-slate-300">—</span>
+                                  <div className="w-16 h-20 rounded-lg bg-slate-100 border border-slate-200 flex items-center justify-center text-2xl">
+                                    {runner.gender === 'Male' ? '🏃‍♂️' : '🏃‍♀️'}
+                                  </div>
                                 )}
-                              </td>
-                              <td className="py-2.5 px-3">
-                                <div className="font-bold text-slate-800">{runner.schoolName}</div>
-                              </td>
-                              <td className="py-2.5 px-3 text-center whitespace-nowrap">
-                                <span
-                                  className={`inline-flex px-2.5 py-0.5 rounded-full text-[10px] font-bold border ${
-                                    runner.participationType === 'school_team'
-                                      ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                                      : 'bg-amber-50 text-amber-800 border-amber-200'
-                                  }`}
-                                >
-                                  {runner.participationType === 'school_team' ? '👥 فريق المؤسسة' : '👤 مشاركة فردية'}
-                                </span>
-                              </td>
-                              <td className="py-2.5 px-3 text-center whitespace-nowrap font-bold text-blue-700">
-                                {runner.distance || activeCategory.distance}
-                              </td>
-                              <td className="py-2.5 px-3 text-center whitespace-nowrap text-slate-500 font-mono text-[11px]">
-                                {runner.birthDate || '—'}
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
+                              </div>
+                              
+                              <div className="flex-1 min-width-0">
+                                <div className="font-black text-slate-900 text-[13px] leading-tight mb-1 truncate">
+                                  {runner.fullName}
+                                </div>
+                                <div className="text-[10px] text-slate-500 font-bold mb-2">
+                                  {runner.schoolName}
+                                </div>
+                                
+                                <div className="space-y-1.5">
+                                  <div className="flex items-center justify-between text-[10px]">
+                                    <span className="text-slate-400 font-medium">رقم مسار:</span>
+                                    <span className="font-mono font-bold text-blue-700">{runner.massarNumber || '—'}</span>
+                                  </div>
+                                  <div className="flex items-center justify-between text-[10px]">
+                                    <span className="text-slate-400 font-medium">الفئة:</span>
+                                    <span className="font-bold text-slate-700">{runner.category || activeCategory.shortLabel}</span>
+                                  </div>
+                                  <div className="flex items-center justify-between text-[10px]">
+                                    <span className="text-slate-400 font-medium">المسافة:</span>
+                                    <span className="font-bold text-emerald-600">{runner.distance || activeCategory.distance}</span>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+
+                            <div className="mt-3 pt-3 border-t border-slate-100 flex items-center justify-between">
+                              <span className={`text-[9px] font-black px-2 py-0.5 rounded-full border ${
+                                runner.participationType === 'school_team'
+                                  ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                  : 'bg-amber-50 text-amber-800 border-amber-200'
+                              }`}>
+                                {runner.participationType === 'school_team' ? 'فريق المؤسسة' : 'مشاركة فردية'}
+                              </span>
+                              
+                              <button
+                                onClick={() => downloadIndividualCardPdf(runner, { id: 'cross_country', name: 'العدو الريفي' }, activeSeason)}
+                                className="flex items-center gap-1.5 px-2 py-1 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-lg text-[10px] font-extrabold transition-colors cursor-pointer"
+                              >
+                                <Download className="h-3 w-3" />
+                                <span>بطاقة المشارك</span>
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )
                   ) : (
                     <div className="p-8 text-center text-slate-500 space-y-2">
                       <div className="w-12 h-12 rounded-full bg-slate-100 text-slate-400 flex items-center justify-center mx-auto text-xl font-bold">

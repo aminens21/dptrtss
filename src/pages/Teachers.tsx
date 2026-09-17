@@ -115,6 +115,8 @@ export const Teachers: React.FC = () => {
   const [teacherToDelete, setTeacherToDelete] = useState<User | null>(null);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [showDeleteAllModal, setShowDeleteAllModal] = useState(false);
+  const [isDeletingAll, setIsDeletingAll] = useState(false);
 
   useEffect(() => {
     setSelectedCadre(cadreQuery || '');
@@ -211,6 +213,21 @@ export const Teachers: React.FC = () => {
     }
   };
 
+  const handleDeleteAllTeachers = async () => {
+    setIsDeletingAll(true);
+    try {
+      await DataService.deleteAllTeachers();
+      toast.success('تم حذف جميع حسابات الأطر التربوية بنجاح');
+      await loadTeachersAndStudents();
+      setShowDeleteAllModal(false);
+    } catch (error) {
+      console.error("Error deleting all teachers:", error);
+      toast.error("حدث خطأ أثناء محاولة حذف الكل");
+    } finally {
+      setIsDeletingAll(false);
+    }
+  };
+
   // Get unique work locations for filter dropdown
   const uniqueLocations = Array.from(
     new Set(teachers.map((t) => t.workLocation).filter(Boolean))
@@ -273,6 +290,17 @@ export const Teachers: React.FC = () => {
           <RefreshCw className="h-3.5 w-3.5" />
           <span>تحديث القائمة</span>
         </button>
+
+        {userProfile?.role === 'CENTRAL_ADMIN' && teachers.length > 0 && (
+          <button
+            onClick={() => setShowDeleteAllModal(true)}
+            className="self-start md:self-auto flex items-center gap-1.5 px-3 py-2 bg-red-50 border border-red-200 hover:bg-red-100 rounded-xl text-xs font-bold text-red-600 transition-all shadow-3xs cursor-pointer"
+            title="حذف جميع حسابات الأطر التربوية في هذه المديرية"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+            <span>حذف الكل</span>
+          </button>
+        )}
       </div>
 
       {/* Stats Cards Dashboard Section */}
@@ -748,6 +776,19 @@ export const Teachers: React.FC = () => {
           message={`هل أنت متأكد من رغبتك في حذف حساب الأستاذ ${teacherToDelete.fullName} بالكامل؟ سيؤدي ذلك لإزالة بياناته وملفه التعريفي من النظام بشكل نهائي.`}
           itemName={teacherToDelete.fullName}
           isDeleting={isDeleting}
+        />
+      )}
+
+      {/* Confirm Delete All Modal */}
+      {showDeleteAllModal && (
+        <ConfirmDeleteModal
+          isOpen={showDeleteAllModal}
+          onClose={() => setShowDeleteAllModal(false)}
+          onConfirm={handleDeleteAllTeachers}
+          title="حذف جميع حسابات الأطر التربوية"
+          message={`تحذير خطير: أنت على وشك حذف جميع حسابات الأطر التربوية (${teachers.length}) المسجلين في مديريتك الحالية. هذا الإجراء سيؤدي لحذف وصولهم للنظام وبياناتهم الشخصية بشكل نهائي. هل أنت متأكد؟`}
+          itemName="جميع الأطر التربوية"
+          isDeleting={isDeletingAll}
         />
       )}
     </div>

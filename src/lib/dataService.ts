@@ -2,7 +2,7 @@ import { Tournament, Match, School, Venue, User, Referee, Student, Sport, AppNot
 import { INITIAL_TOURNAMENTS, INITIAL_MATCHES, INITIAL_SCHOOLS, INITIAL_VENUES, INITIAL_DIRECTORATES } from './initialData';
 import { INITIAL_CROSS_COUNTRY_RESULTS } from './crossCountryConfig';
 import { db } from '../firebase/config';
-import { collection, getDocs, addDoc, doc, getDoc, updateDoc, setDoc, deleteDoc, Timestamp, serverTimestamp, query, where, onSnapshot } from 'firebase/firestore';
+import { collection, getDocs, addDoc, doc, getDoc, updateDoc, setDoc, deleteDoc, Timestamp, serverTimestamp, query, where, onSnapshot, writeBatch } from 'firebase/firestore';
 
 const STORAGE_KEYS = {
   TOURNAMENTS: 'taourirt_tournaments_data',
@@ -151,8 +151,8 @@ export const getAgeCategoriesForSeason = (season: string, gender?: 'Male' | 'Fem
   ];
 };
 
-export function normalizeCategoryKey(catStr: string): string {
-  if (!catStr) return 'U15';
+export function normalizeCategoryKey(catStr: any): string {
+  if (!catStr || typeof catStr !== 'string') return 'U15';
   const c = catStr.trim().toUpperCase();
   if (c.includes('U12') || c.includes('براعم') || c.includes('برعمات')) return 'U12';
   if (c.includes('U15') || c.includes('صغار') || c.includes('صغيرات')) return 'U15';
@@ -162,7 +162,8 @@ export function normalizeCategoryKey(catStr: string): string {
   return catStr;
 }
 
-export function getCategoryShortName(category: string, gender?: string): string {
+export function getCategoryShortName(category: any, gender?: string): string {
+  if (!category || typeof category !== 'string') return category || '';
   const normKey = normalizeCategoryKey(category);
   if (normKey === 'U12') {
     if (gender === 'Female' || gender === 'إناث') return 'البرعمات';
@@ -187,7 +188,8 @@ export function getCategoryShortName(category: string, gender?: string): string 
   return category;
 }
 
-export function getCategoryGenderLabel(category: string, gender?: string, season: string = '2026/2027'): string {
+export function getCategoryGenderLabel(category: any, gender?: string, season: string = '2026/2027'): string {
+  if (!category || typeof category !== 'string') return category || '';
   const normKey = normalizeCategoryKey(category);
   const match = season.match(/(\d{4})/);
   const startYear = match ? parseInt(match[1], 10) : 2026;
@@ -663,12 +665,14 @@ export const DataService = {
         setLocal(STORAGE_KEYS.SCHOOLS, firestoreList);
         return firestoreList;
       } else {
-        // If Firestore has no schools, return empty list so the Regional/Central admin can add them
+        // If Firestore is empty, we return an empty list instead of auto-seeding
+        // This allows the user to have a clean database after "Delete All"
         setLocal(STORAGE_KEYS.SCHOOLS, []);
         return [];
       }
     } catch (e) {
       console.warn("Firestore schools fetch error:", e);
+      // Fallback to local storage only, without INITIAL_SCHOOLS to respect empty state
       const localList = getLocal<School>(STORAGE_KEYS.SCHOOLS, []);
       return localList.filter(s => s && s.name && !s.name.includes('الكندي') && !s.name.includes('غير محدد') && s.name.trim() !== 'ثانوية المغرب العربي التأهيلية');
     }
@@ -752,6 +756,34 @@ export const DataService = {
     }
   },
 
+  async deleteAllSchools(): Promise<void> {
+    const activeDirId = this.getActiveDirectorateId();
+    
+    // 1. Delete from Firestore
+    try {
+      const q = query(collection(db, 'schools'), where('directorateId', '==', activeDirId));
+      const snap = await getDocs(q);
+      
+      if (!snap.empty) {
+        const batch = writeBatch(db);
+        snap.docs.forEach((d) => {
+          batch.delete(d.ref);
+        });
+        await batch.commit();
+      }
+    } catch (e) {
+      console.error("Error deleting all schools from Firestore:", e);
+    }
+
+    // 2. Delete from Local Storage
+    const localList = getLocal<School>(STORAGE_KEYS.SCHOOLS, []);
+    const updated = localList.filter(s => (s.directorateId || 'taourirt') !== activeDirId);
+    setLocal(STORAGE_KEYS.SCHOOLS, updated);
+    
+    // Trigger global UI refresh
+    window.dispatchEvent(new CustomEvent('schoolsUpdated'));
+  },
+
   async addSchoolsBulk(newSchools: Omit<School, 'id'>[]): Promise<School[]> {
     const activeDirId = this.getActiveDirectorateId();
     const existing = await this.getSchools();
@@ -765,19 +797,34 @@ export const DataService = {
       }
     });
 
+    // Use Firestore Batch for atomic and fast updates (up to 500 docs per batch)
+    const batch = writeBatch(db);
+    let batchCount = 0;
+
     for (const item of newSchools) {
       const cleanName = item.name?.trim();
       if (!cleanName) continue;
       const key = cleanName.toLowerCase();
       
+      // Ensure no field is undefined for Firestore
+      const cleanItem: any = {};
+      Object.entries(item).forEach(([k, v]) => {
+        if (v !== undefined) {
+          cleanItem[k] = v;
+        } else {
+          cleanItem[k] = ""; // Replace undefined with empty string
+        }
+      });
+
       const itemWithDir = {
-        ...item,
-        directorateId: item.directorateId || activeDirId
+        ...cleanItem,
+        directorateId: item.directorateId || activeDirId,
+        updatedAt: serverTimestamp()
       };
 
       const existingSchool = updatedMap.get(key);
       if (existingSchool) {
-        // Update existing school properties with new import data
+        // Update existing school
         const updatedItem: School = {
           ...existingSchool,
           ...itemWithDir,
@@ -785,43 +832,54 @@ export const DataService = {
           id: existingSchool.id,
           coordinatorName: itemWithDir.coordinatorName || itemWithDir.teacherName || existingSchool.coordinatorName,
           teacherName: itemWithDir.coordinatorName || itemWithDir.teacherName || existingSchool.teacherName
-        };
+        } as any;
+        
         updatedMap.set(key, updatedItem);
         createdOrUpdatedList.push(updatedItem);
-        try {
-          await updateDoc(doc(db, 'schools', existingSchool.id), {
-            ...itemWithDir,
-            updatedAt: Timestamp.now()
-          });
-        } catch (e) {
-          console.warn("Updated school locally:", e);
-        }
+        
+        const docRef = doc(db, 'schools', existingSchool.id);
+        batch.update(docRef, itemWithDir);
+        batchCount++;
       } else {
         // Create new school
-        const tempId = `sch-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+        const docRef = doc(collection(db, 'schools'));
         const newSchool: School = {
           ...itemWithDir,
-          id: tempId,
+          id: docRef.id,
           name: cleanName,
           coordinatorName: itemWithDir.coordinatorName || itemWithDir.teacherName || '',
-          teacherName: itemWithDir.coordinatorName || itemWithDir.teacherName || ''
-        };
-        try {
-          const docRef = await addDoc(collection(db, 'schools'), {
-            ...itemWithDir,
-            createdAt: Timestamp.now()
-          });
-          newSchool.id = docRef.id;
-        } catch (e) {
-          console.warn("Saved school locally:", e);
-        }
+          teacherName: itemWithDir.coordinatorName || itemWithDir.teacherName || '',
+          createdAt: serverTimestamp()
+        } as any;
+        
+        batch.set(docRef, { ...itemWithDir, createdAt: serverTimestamp() });
         updatedMap.set(key, newSchool);
         createdOrUpdatedList.push(newSchool);
+        batchCount++;
+      }
+
+      // Firestore batches are limited to 500 operations
+      if (batchCount >= 450) {
+        await batch.commit();
+        // Reset batch if we have more
+      }
+    }
+
+    if (batchCount > 0) {
+      try {
+        await batch.commit();
+      } catch (e) {
+        console.error("Firestore batch commit error:", e);
+        // If Firestore fails, we still have the local state for immediate use
       }
     }
 
     const finalList = Array.from(updatedMap.values());
     setLocal(STORAGE_KEYS.SCHOOLS, finalList);
+    
+    // Trigger global UI refresh
+    window.dispatchEvent(new CustomEvent('schoolsUpdated'));
+    
     return createdOrUpdatedList;
   },
 
@@ -1214,6 +1272,45 @@ export const DataService = {
       }
     } catch (e) {
       console.warn("Local storage delete user error:", e);
+    }
+  },
+
+  async deleteAllTeachers(): Promise<void> {
+    const activeDirId = this.getActiveDirectorateId();
+    
+    // 1. Delete from Firestore
+    try {
+      // Find all users with role TEACHER in this directorate
+      const q = query(
+        collection(db, 'users'), 
+        where('role', '==', 'TEACHER'),
+        where('directorateId', '==', activeDirId)
+      );
+      const snap = await getDocs(q);
+      
+      if (!snap.empty) {
+        const batch = writeBatch(db);
+        snap.docs.forEach((d) => {
+          batch.delete(d.ref);
+        });
+        await batch.commit();
+      }
+    } catch (e) {
+      console.error("Error deleting all teachers from Firestore:", e);
+    }
+
+    // 2. Delete from Local Storage
+    try {
+      const localUsersRaw = localStorage.getItem('local_registered_users');
+      if (localUsersRaw) {
+        const users = JSON.parse(localUsersRaw) as User[];
+        const updated = users.filter(u => 
+          !(u.role === 'TEACHER' && (u.directorateId || 'taourirt') === activeDirId)
+        );
+        localStorage.setItem('local_registered_users', JSON.stringify(updated));
+      }
+    } catch (e) {
+      console.warn("Local storage delete all teachers error:", e);
     }
   },
 
@@ -1905,6 +2002,13 @@ export const DataService = {
       if (!snap.empty) {
         const firestoreList = snap.docs.map(d => ({ id: d.id, ...d.data() } as Directorate));
         return deduplicateById(firestoreList);
+      } else {
+        // AUTO-SEED: If new database, seed with initial directorates
+        console.log("Seeding initial directorates to new Firestore...");
+        for (const dir of INITIAL_DIRECTORATES) {
+          await this.addDirectorate(dir);
+        }
+        return INITIAL_DIRECTORATES;
       }
     } catch (e) {
       console.warn("Firestore directorates fetch error, falling back to cache:", e);

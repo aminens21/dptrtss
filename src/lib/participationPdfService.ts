@@ -1,5 +1,6 @@
 import { Student, School, User, Sport, Directorate } from '../types';
-import { SPORTS_MAP, getAgeCategoriesForSeason } from './dataService';
+import { SPORTS_MAP, getAgeCategoriesForSeason, DataService } from './dataService';
+import toast from 'react-hot-toast';
 
 export interface ParticipationPdfOptions {
   sport: Sport | { id: string; name: string };
@@ -239,6 +240,134 @@ export function generateParticipationFormHtml(options: ParticipationPdfOptions):
       </div>
     </div>
   `;
+}
+
+export function generateIndividualCardHtml(student: Student, sport: Sport | { id: string; name: string }, season: string, officialLogos?: any): string {
+  const sportName = SPORTS_MAP[sport.id]?.name || sport.name || sport.id;
+  const affiliationLabel = student.affiliationType === 'club_affiliated' ? 'منتمي لنادي / عصبة' : 'لا منتمي (مدرسي)';
+  
+  return `
+    <div dir="rtl" style="font-family: 'Cairo', sans-serif; width: 100%; max-width: 400px; margin: 0 auto; border: 3px solid #0369a1; border-radius: 15px; padding: 15px; background: #fff; box-shadow: 0 4px 6px rgba(0,0,0,0.1); position: relative; overflow: hidden;">
+      <!-- Watermark/Background Decoration -->
+      <div style="position: absolute; top: -20px; right: -20px; font-size: 150px; opacity: 0.03; pointer-events: none; transform: rotate(-15deg);">🏃</div>
+      
+      <!-- Header -->
+      <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #e2e8f0; padding-bottom: 10px; margin-bottom: 15px;">
+        <div style="text-align: right;">
+          <div style="font-size: 10px; font-weight: 800; color: #64748b; margin-bottom: 2px;">وزارة التربية الوطنية والتعليم الأولي والرياضة</div>
+          <div style="font-size: 12px; font-weight: 900; color: #0369a1;">بطاقة مشارك فردي - العدو الريفي</div>
+        </div>
+        ${officialLogos?.frmssLogo ? `<img src="${officialLogos.frmssLogo}" style="height: 35px;" />` : ''}
+      </div>
+
+      <!-- Main Body -->
+      <div style="display: flex; gap: 15px;">
+        <!-- Photo -->
+        <div style="width: 100px; height: 120px; border: 2px solid #cbd5e1; border-radius: 10px; background: #f8fafc; display: flex; align-items: center; justify-content: center; overflow: hidden; flex-shrink: 0;">
+          ${student.photoUrl 
+            ? `<img src="${student.photoUrl}" style="width: 100%; height: 100%; object-fit: cover;" />`
+            : `<span style="font-size: 40px; opacity: 0.2;">🏃‍♀️</span>`
+          }
+        </div>
+
+        <!-- Details -->
+        <div style="flex: 1; min-width: 0;">
+          <div style="margin-bottom: 8px;">
+            <div style="font-size: 9px; color: #64748b; font-weight: 700;">الاسم والنسب:</div>
+            <div style="font-size: 14px; font-weight: 900; color: #0f172a; line-height: 1.2;">${student.fullName}</div>
+          </div>
+          
+          <div style="margin-bottom: 8px;">
+            <div style="font-size: 9px; color: #64748b; font-weight: 700;">رقم مسار:</div>
+            <div style="font-size: 13px; font-weight: 800; color: #0369a1; font-family: monospace;">${student.massarNumber || '—'}</div>
+          </div>
+
+          <div style="display: grid; grid-cols: 2 gap: 10px;">
+            <div>
+              <div style="font-size: 9px; color: #64748b; font-weight: 700;">الفئة:</div>
+              <div style="font-size: 11px; font-weight: 800; color: #0f172a;">${student.category}</div>
+            </div>
+            <div>
+              <div style="font-size: 9px; color: #64748b; font-weight: 700;">الموسم:</div>
+              <div style="font-size: 11px; font-weight: 800; color: #0f172a;">${season}</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Additional Info -->
+      <div style="margin-top: 15px; padding: 10px; background: #f0f9ff; border-radius: 10px; border: 1px solid #bae6fd;">
+        <div style="display: flex; justify-content: space-between; margin-bottom: 5px;">
+          <span style="font-size: 10px; font-weight: 700; color: #0369a1;">المؤسسة:</span>
+          <span style="font-size: 10px; font-weight: 800; color: #0f172a;">${student.schoolName}</span>
+        </div>
+        <div style="display: flex; justify-content: space-between;">
+          <span style="font-size: 10px; font-weight: 700; color: #0369a1;">الصفة:</span>
+          <span style="font-size: 10px; font-weight: 900; color: #b45309;">${affiliationLabel}</span>
+        </div>
+      </div>
+
+      <!-- Footer / Signature -->
+      <div style="margin-top: 15px; display: flex; justify-content: space-between; align-items: flex-end;">
+        <div style="text-align: center; width: 45%;">
+          <div style="font-size: 9px; font-weight: 700; color: #64748b; margin-bottom: 25px;">خاتم وتوقيع المؤسسة</div>
+          <div style="border-top: 1px dashed #cbd5e1; width: 80%; margin: 0 auto;"></div>
+        </div>
+        <div style="text-align: center; width: 45%;">
+          <div style="font-size: 9px; font-weight: 700; color: #64748b; margin-bottom: 25px;">خاتم الفرع الإقليمي</div>
+          <div style="border-top: 1px dashed #cbd5e1; width: 80%; margin: 0 auto;"></div>
+        </div>
+      </div>
+      
+      <div style="margin-top: 10px; text-align: center; font-size: 8px; color: #94a3b8; border-top: 1px solid #f1f5f9; padding-top: 5px;">
+        منظومة تدبير البطولات المدرسية - المديرية الإقليمية تاوريرت
+      </div>
+    </div>
+  `;
+}
+
+export async function downloadIndividualCardPdf(student: Student, sport: Sport | { id: string; name: string }, season: string, filename?: string): Promise<void> {
+  const logos = await DataService.getOfficialLogos();
+  const htmlString = generateIndividualCardHtml(student, sport, season, logos);
+  const finalFilename = filename || `بطاقة_مشارك_${student.fullName.replace(/\s+/g, '_')}.pdf`;
+
+  return new Promise((resolve) => {
+    const printWindow = window.open('', '_blank');
+    if (!printWindow) {
+      toast.error('يرجى السماح بالنوافذ المنبثقة لتحميل البطاقة');
+      resolve();
+      return;
+    }
+
+    printWindow.document.write(`
+      <html dir="rtl" lang="ar">
+        <head>
+          <title>${finalFilename}</title>
+          <meta charset="utf-8" />
+          <style>
+            @import url('https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800;900&display=swap');
+            @page { size: auto; margin: 5mm; }
+            body { font-family: 'Cairo', system-ui, sans-serif; margin: 0; padding: 20px; display: flex; justify-content: center; }
+          </style>
+        </head>
+        <body>
+          ${htmlString}
+          <script>
+            window.onload = () => {
+              setTimeout(() => {
+                window.focus();
+                window.print();
+                // Close after a delay in some browsers
+                // window.close(); 
+              }, 500);
+            };
+          </script>
+        </body>
+      </html>
+    `);
+    printWindow.document.close();
+    resolve();
+  });
 }
 
 export async function downloadParticipationFormPdf(options: ParticipationPdfOptions, filename?: string): Promise<void> {

@@ -55,6 +55,8 @@ export const Schools: React.FC = () => {
   const [editingSchool, setEditingSchool] = useState<School | null>(null);
   const [schoolToDelete, setSchoolToDelete] = useState<School | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [showDeleteAllModal, setShowDeleteAllModal] = useState(false);
+  const [isDeletingAll, setIsDeletingAll] = useState(false);
   const [selectedSchoolForParticipants, setSelectedSchoolForParticipants] = useState<School | null>(null);
 
   // CENTRAL_ADMIN, SPORT_MANAGER, and Technical Committee Head can manage schools
@@ -95,12 +97,14 @@ export const Schools: React.FC = () => {
 
   useEffect(() => {
     loadSchools();
-    const handleDirChanged = () => {
+    const handleRefresh = () => {
       loadSchools();
     };
-    window.addEventListener('directorateChanged', handleDirChanged);
+    window.addEventListener('directorateChanged', handleRefresh);
+    window.addEventListener('schoolsUpdated', handleRefresh);
     return () => {
-      window.removeEventListener('directorateChanged', handleDirChanged);
+      window.removeEventListener('directorateChanged', handleRefresh);
+      window.removeEventListener('schoolsUpdated', handleRefresh);
     };
   }, []);
 
@@ -168,6 +172,21 @@ export const Schools: React.FC = () => {
       toast.error('تعذر حذف المؤسسة');
     } finally {
       setIsDeleting(false);
+    }
+  };
+
+  const handleDeleteAllSchools = async () => {
+    setIsDeletingAll(true);
+    try {
+      await DataService.deleteAllSchools();
+      toast.success('تم حذف جميع المؤسسات التعليمية بنجاح');
+      await loadSchools();
+      setShowDeleteAllModal(false);
+    } catch (e) {
+      console.error(e);
+      toast.error('حدث خطأ أثناء محاولة حذف الكل');
+    } finally {
+      setIsDeletingAll(false);
     }
   };
 
@@ -545,6 +564,18 @@ export const Schools: React.FC = () => {
             >
               <Plus className="h-4 w-4" />
               <span>إضافة مؤسسة تعليمية</span>
+            </button>
+          )}
+
+          {/* Delete All - ONLY FOR CENTRAL ADMIN */}
+          {userProfile?.role === 'CENTRAL_ADMIN' && schools.length > 0 && (
+            <button
+              onClick={() => setShowDeleteAllModal(true)}
+              className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-red-50 border border-red-200 px-3.5 py-2 text-xs font-bold text-red-600 shadow-3xs hover:bg-red-100 transition-colors cursor-pointer"
+              title="حذف جميع المؤسسات المسجلة في هذه المديرية"
+            >
+              <Trash2 className="h-4 w-4" />
+              <span>حذف الكل</span>
             </button>
           )}
         </div>
@@ -1209,6 +1240,17 @@ export const Schools: React.FC = () => {
         message="هل أنت متأكد من رغبتك في حذف هذه المؤسسة من دليل المشاركين؟"
         itemName={schoolToDelete?.name}
         isDeleting={isDeleting}
+      />
+
+      {/* Confirm Delete All Modal */}
+      <ConfirmDeleteModal
+        isOpen={showDeleteAllModal}
+        onClose={() => setShowDeleteAllModal(false)}
+        onConfirm={handleDeleteAllSchools}
+        title="حذف جميع المؤسسات التعليمية"
+        message={`تحذير خطير: أنت على وشك حذف جميع المؤسسات التعليمية (${schools.length}) التابعة لمديريتك الحالية. هل أنت متأكد تماماً من هذا الإجراء؟ لا يمكن التراجع عن هذه العملية.`}
+        itemName="جميع المؤسسات"
+        isDeleting={isDeletingAll}
       />
 
       {/* School Participants Modal for Filtered Sport */}

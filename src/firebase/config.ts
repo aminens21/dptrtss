@@ -1,11 +1,17 @@
 import { initializeApp } from "firebase/app";
 import { getAuth } from "firebase/auth";
-import { initializeFirestore } from "firebase/firestore";
-import config from "../../firebase-applet-config.json";
+import { getFirestore } from "firebase/firestore";
 
-export const app = initializeApp(config);
+const firebaseConfig = {
+  apiKey: "AIzaSyBgXSf0mNdOzeWzhGbmfP6BxqeQNuZ0ejc",
+  authDomain: "dptrtss-v2.firebaseapp.com",
+  projectId: "dptrtss-v2",
+  storageBucket: "dptrtss-v2.firebasestorage.app",
+  messagingSenderId: "101843765424",
+  appId: "1:101843765424:web:ae13ef3b3f661ca6d09375"
+};
+
+export const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
-export const db = initializeFirestore(app, {
-  experimentalForceLongPolling: true
-}, config.firestoreDatabaseId);
+export const db = getFirestore(app);
 
